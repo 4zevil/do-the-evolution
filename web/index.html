@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simulador de Ecossistema e Evolução Natural</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════════════
+       BARRA DE NAVEGAÇÃO SUPERIOR
+  ═════════════════════════════════════════════════ -->
+  <header class="top-bar">
+    <div class="logo" onclick="showPage('menu')">
+      <span>🧬</span> EvoSim
+      <span>| Ecossistema & Evolução</span>
+    </div>
+
+    <div class="spacer"></div>
+
+    <nav class="nav-tabs">
+      <button class="nav-tab-btn active" data-page="menu" onclick="showPage('menu')">
+        🏠 Início
+      </button>
+      <button class="nav-tab-btn" data-page="species" onclick="showPage('species')">
+        🦊 Criar Animal
+      </button>
+      <button class="nav-tab-btn" data-page="plants" onclick="showPage('plants')">
+        🌿 Criar Planta
+      </button>
+      <button class="nav-tab-btn" data-page="world" onclick="showPage('world')">
+        🌍 Novo Mundo
+      </button>
+      <button class="nav-tab-btn" data-page="simulation" onclick="showPage('simulation')" style="color:var(--accent);">
+        🎮 Simulação
+      </button>
+    </nav>
+  </header>
+
+  <!-- ════════════════════════════════════════════════
+       PÁGINA 1: MENU PRINCIPAL
+  ═════════════════════════════════════════════════ -->
+  <main id="page-menu" class="page active">
+    <div class="menu-hero">
+      <h1>Simulador de Evolução</h1>
+      <p>Crie espécies de animais e plantas desenhando cada parte na hora com o Paint integrado ou ajustando genes contínuos. Configure biomas e observe a seleção natural ao vivo.</p>
+    </div>
+
+    <div class="menu-cards">
+      <!-- Card Iniciar Simulação -->
+      <div class="menu-card" style="--card-accent:#3fb950" onclick="showPage('simulation')">
+        <span class="card-icon">🎮</span>
+        <h3>Iniciar Simulação</h3>
+        <p>Execute a simulação ecológica viva em 2D com as espécies e o mundo configurados.</p>
+      </div>
+
+      <!-- Card Animal -->
+      <div class="menu-card" style="--card-accent:#79c0ff" onclick="showPage('species')">
+        <span class="card-icon">🦊</span>
+        <h3>Criar Animal (Paint)</h3>
+        <p>Desenhe o corpo, patas, boca e olhos no Paint integrado ou use gerador procedural.</p>
+      </div>
+
+      <!-- Card Planta -->
+      <div class="menu-card" style="--card-accent:#56d364" onclick="showPage('plants')">
+        <span class="card-icon">🌿</span>
+        <h3>Criar Planta (Paint)</h3>
+        <p>Desenhe raízes, caule, folhas e frutos no Paint na hora e ajuste os genes botânicos.</p>
+      </div>
+
+      <!-- Card Mundo -->
+      <div class="menu-card" style="--card-accent:#ffa657" onclick="showPage('world')">
+        <span class="card-icon">🌍</span>
+        <h3>Configurar Mundo</h3>
+        <p>Escolha o bioma, o tamanho da grade e selecione as espécies que habitarão o ecossistema.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- ════════════════════════════════════════════════
+       PÁGINA 2: CRIADOR DE ANIMAIS
+  ═════════════════════════════════════════════════ -->
+  <section id="page-species" class="page">
+    <div class="creator-layout">
+
+      <!-- PAINEL LATERAL -->
+      <aside class="sidebar-panel">
+        <div class="panel-subnav">
+          <button id="btn-animal-tab-attrs" class="active" onclick="switchAnimalSidebarTab('attrs')">
+            ⚙️ Atributos
+          </button>
+          <button id="btn-animal-tab-components" onclick="switchAnimalSidebarTab('components')">
+            🎨 Desenhar Partes
+          </button>
+        </div>
+
+        <div class="sidebar-scroll">
+
+          <!-- SUB-ABA 1: ATRIBUTOS GENÉTICOS -->
+          <div id="animal-tab-attrs">
+            <div id="animal-attrs">
+
+              <!-- Físico -->
+              <div class="attr-group">
+                <div class="attr-group-title">🔬 Físico & Metabolismo</div>
+                <div class="attr-row">
+                  <label>Tamanho <span>50%</span></label>
+                  <input type="range" min="0.05" max="1" step="0.01" value="0.5" data-gene="size" />
+                </div>
+                <div class="attr-row">
+                  <label>Velocidade <span>50%</span></label>
+                  <input type="range" min="0.05" max="1" step="0.01" value="0.5" data-gene="speed" />
+                </div>
+
+                <div class="attr-row">
+                  <label>Adaptação Aquática (Nadador) <span>15%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.15" data-gene="aquatic" />
+                </div>
+                <div class="attr-row">
+                  <label>Percepção (Visão) <span>50%</span></label>
+                  <input type="range" min="0.05" max="1" step="0.01" value="0.5" data-gene="perception" />
+                </div>
+                <div class="attr-row">
+                  <label>Saúde / Resistência <span>50%</span></label>
+                  <input type="range" min="0.05" max="1" step="0.01" value="0.5" data-gene="health" />
+                </div>
+              </div>
+
+              <!-- Dieta Restrita (Soma 100%) -->
+              <div class="attr-group">
+                <div class="attr-group-title">🍖 Dieta e Eficiência Digestiva (Soma: <span id="diet-total-label" style="color:var(--accent);">100%</span>)</div>
+                <div class="attr-row">
+                  <label>Índice Carnívoro <span>30%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.3" data-diet="meat" oninput="updateStrictDietUI('meat', this.value)" />
+                </div>
+                <div class="attr-row">
+                  <label>Índice Vegetal <span>60%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.6" data-diet="plant" oninput="updateStrictDietUI('plant', this.value)" />
+                </div>
+                <div class="attr-row">
+                  <label>Índice Carroceiro (Carcaças) <span>10%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.1" data-diet="carcass" oninput="updateStrictDietUI('carcass', this.value)" />
+                </div>
+              </div>
+
+              <!-- Comportamento -->
+              <div class="attr-group">
+                <div class="attr-group-title">🧠 Comportamento & Defesa</div>
+                <div class="attr-row">
+                  <label>Agressividade (Hipopótamo) <span>30%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.3" data-gene="aggression" />
+                </div>
+              </div>
+
+              <!-- Reprodução -->
+              <div class="attr-group">
+                <div class="attr-group-title">🍼 Ciclo Reprodutivo</div>
+                <div class="attr-row">
+                  <label>Tempo de Gestação <span>40%</span></label>
+                  <input type="range" min="0.1" max="1" step="0.01" value="0.4" data-gene="gestation" />
+                </div>
+                <div class="attr-row">
+                  <label>Nº de Filhotes <span>40%</span></label>
+                  <input type="range" min="0.1" max="1" step="0.01" value="0.4" data-gene="offspringCount" />
+                </div>
+              </div>
+
+              <!-- Clima & Visual -->
+              <div class="attr-group">
+                <div class="attr-group-title">🌡️ Clima e Pigmentação</div>
+                <div class="attr-row thermal">
+                  <label>Tolerância Térmica <span>🌿 Neutro (0.00)</span></label>
+                  <input type="range" min="-1" max="1" step="0.01" value="0" data-gene="thermal" />
+                </div>
+                <div class="attr-row">
+                  <label>Matiz da Cor <span style="color:hsl(120,75%,65%)">120°</span></label>
+                  <input type="range" min="0" max="360" step="1" value="120" data-gene="colorHue" />
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- SUB-ABA 2: DESENHAR COMPONENTES (PAINT) -->
+          <div id="animal-tab-components" style="display:none;">
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.4;">
+              Clique em <strong>🎨 Desenhar</strong> para criar qualquer parte no Paint na hora! As partes desenhadas se adaptam dinamicamente aos genes do animal.
+            </p>
+
+            <!-- Componente: Corpo -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🟢 Corpo Central</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Tamanho</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-animal-body">
+                  <span class="placeholder-icon">🎨</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('animal', 'body', 'Corpo Central')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-animal-body" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('animal', 'body')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Componente: Membros/Patas -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🦵 Membros / Patas</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Velocidade</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-animal-limbs">
+                  <span class="placeholder-icon">🎨</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('animal', 'limbs', 'Membros e Patas')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-animal-limbs" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('animal', 'limbs')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Componente: Boca/Mandíbula -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">👄 Mandíbula / Boca</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Dieta Carnívora</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-animal-jaw">
+                  <span class="placeholder-icon">🎨</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('animal', 'jaw', 'Mandíbula e Boca')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-animal-jaw" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('animal', 'jaw')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Componente: Olhos -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">👀 Olhos</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Percepção</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-animal-eyes">
+                  <span class="placeholder-icon">🎨</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('animal', 'eyes', 'Olhos')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-animal-eyes" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('animal', 'eyes')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Componente: Detalhes -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">✨ Cobertura / Espinhos</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Agressividade/Clima</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-animal-detail">
+                  <span class="placeholder-icon">🎨</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('animal', 'detail', 'Espinhos e Cobertura')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-animal-detail" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('animal', 'detail')">✕</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- CATÁLOGO DE ANIMAIS SALVOS -->
+        <div class="saved-section">
+          <div class="saved-section-title">
+            <span>💾 Animais Salvos</span>
+            <span style="color:var(--accent);cursor:pointer;" onclick="randomizeAnimalGenes()">🎲 Sortear</span>
+          </div>
+          <div class="saved-list" id="saved-animals-list"></div>
+        </div>
+      </aside>
+
+      <!-- ÁREA DE VISUALIZAÇÃO (CANVAS) -->
+      <main class="creator-main">
+        <div class="canvas-viewport">
+          <span class="canvas-badge">Preview em Tempo Real</span>
+          <canvas id="animal-canvas" width="520" height="420"></canvas>
+        </div>
+
+        <!-- RODAPÉ DE AÇÕES -->
+        <footer class="creator-footer">
+          <input type="text" id="animal-name" placeholder="Nome da espécie animal (ex: Predador das Sombras)" maxlength="40" />
+          <button class="btn btn-primary" onclick="saveAnimalSpecies()">💾 Salvar Animal</button>
+          <button class="btn btn-secondary" onclick="exportAnimalPNG()">🖼️ Exportar Sprite PNG</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetAnimalGenes()">🔄 Reset</button>
+        </footer>
+      </main>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       PÁGINA 3: CRIADOR DE PLANTAS
+  ═════════════════════════════════════════════════ -->
+  <section id="page-plants" class="page">
+    <div class="creator-layout">
+
+      <!-- PAINEL LATERAL BOTÂNICO -->
+      <aside class="sidebar-panel">
+        <div class="panel-subnav">
+          <button id="btn-plant-tab-attrs" class="active" onclick="switchPlantSidebarTab('attrs')">
+            🌿 Atributos Botânicos
+          </button>
+          <button id="btn-plant-tab-components" onclick="switchPlantSidebarTab('components')">
+            🎨 Desenhar Partes
+          </button>
+        </div>
+
+        <div class="sidebar-scroll">
+
+          <!-- SUB-ABA 1: GENES DAS PLANTAS -->
+          <div id="plant-tab-attrs">
+            <div id="plant-attrs">
+
+              <div class="attr-group">
+                <div class="attr-group-title">🌱 Morfologia & Crescimento</div>
+                <div class="attr-row">
+                  <label>Altura / Tamanho <span>50%</span></label>
+                  <input type="range" min="0.1" max="1" step="0.01" value="0.5" data-gene="height" />
+                </div>
+                <div class="attr-row">
+                  <label>Eficiência de Raiz (Seca) <span>50%</span></label>
+                  <input type="range" min="0.1" max="1" step="0.01" value="0.5" data-gene="rootEfficiency" />
+                </div>
+                <div class="attr-row">
+                  <label>Velocidade de Crescimento <span>50%</span></label>
+                  <input type="range" min="0.1" max="1" step="0.01" value="0.5" data-gene="growthSpeed" />
+                </div>
+              </div>
+
+              <div class="attr-group">
+                <div class="attr-group-title">🛡️ Defesa & Adaptação</div>
+                <div class="attr-row">
+                  <label>Defesa (Espinhos / Toxina) <span>30%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.3" data-gene="defense" />
+                </div>
+                <div class="attr-row">
+                  <label>Resistência a Parasitas <span>50%</span></label>
+                  <input type="range" min="0.1" max="1" step="0.01" value="0.5" data-gene="parasiteResistance" />
+                </div>
+              </div>
+
+              <div class="attr-group">
+                <div class="attr-group-title">🍎 Reprodução & Frutos</div>
+                <div class="attr-row">
+                  <label>Atratividade do Fruto <span>40%</span></label>
+                  <input type="range" min="0" max="1" step="0.01" value="0.4" data-gene="fruitAttraction" />
+                </div>
+              </div>
+
+              <div class="attr-group">
+                <div class="attr-group-title">🌡️ Clima & Pigmentação</div>
+                <div class="attr-row thermal">
+                  <label>Tolerância Térmica <span>🌿 Neutro (0.00)</span></label>
+                  <input type="range" min="-1" max="1" step="0.01" value="0" data-gene="thermal" />
+                </div>
+                <div class="attr-row">
+                  <label>Matiz da Folhagem <span style="color:hsl(110,75%,65%)">110°</span></label>
+                  <input type="range" min="0" max="360" step="1" value="110" data-gene="colorHue" />
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- SUB-ABA 2: DESENHAR COMPONENTES DA PLANTA (PAINT) -->
+          <div id="plant-tab-components" style="display:none;">
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.4;">
+              Desenhe partes botânicas exclusivas no Paint na hora! As imagens desenhadas serão escaladas conforme a altura, raízes e frutos definidos nos genes.
+            </p>
+
+            <!-- Raízes -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🌾 Raízes</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Eficiência de Raiz</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-plant-roots">
+                  <span class="placeholder-icon">🌱</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('plant', 'roots', 'Raízes Subterrâneas')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-plant-roots" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('plant', 'roots')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Caule / Tronco -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🪵 Caule / Tronco</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Altura</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-plant-stem">
+                  <span class="placeholder-icon">🌱</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('plant', 'stem', 'Caule e Tronco')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-plant-stem" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('plant', 'stem')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Folhas / Copa -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🍃 Folhas / Copa</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Altura e Matiz</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-plant-leaves">
+                  <span class="placeholder-icon">🌱</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('plant', 'leaves', 'Folhas e Copa')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-plant-leaves" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('plant', 'leaves')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Espinhos -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🌵 Espinhos / Defesa</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Defesa</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-plant-thorns">
+                  <span class="placeholder-icon">🌱</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('plant', 'thorns', 'Espinhos e Toxinas')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-plant-thorns" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('plant', 'thorns')">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Frutos / Flores -->
+            <div class="component-card">
+              <div class="component-header">
+                <span class="component-title">🍎 Frutos / Flores</span>
+                <span style="font-size:11px;color:var(--accent);">Escalado por Atratividade</span>
+              </div>
+              <div class="component-body">
+                <div class="component-preview-box" id="box-plant-fruit">
+                  <span class="placeholder-icon">🌱</span>
+                </div>
+                <div class="component-actions">
+                  <button class="btn btn-primary btn-sm" onclick="miniPaint.open('plant', 'fruit', 'Frutos e Flores')">
+                    🎨 Desenhar no Paint
+                  </button>
+                  <label class="file-upload-btn">
+                    📁 PNG
+                    <input type="file" id="upload-plant-fruit" accept="image/*" />
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="clearComponentImage('plant', 'fruit')">✕</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- CATÁLOGO DE PLANTAS SALVAS -->
+        <div class="saved-section">
+          <div class="saved-section-title">
+            <span>💾 Plantas Salvas</span>
+            <span style="color:var(--accent);cursor:pointer;" onclick="randomizePlantGenes()">🎲 Sortear</span>
+          </div>
+          <div class="saved-list" id="saved-plants-list"></div>
+        </div>
+      </aside>
+
+      <!-- ÁREA DE PREVIEW DA PLANTA -->
+      <main class="creator-main">
+        <div class="canvas-viewport">
+          <span class="canvas-badge">Preview Botânico</span>
+          <canvas id="plant-canvas" width="520" height="420"></canvas>
+        </div>
+
+        <!-- RODAPÉ -->
+        <footer class="creator-footer">
+          <input type="text" id="plant-name" placeholder="Nome da planta (ex: Carvalho Espinhoso)" maxlength="40" />
+          <button class="btn btn-primary" onclick="savePlantSpecies()">💾 Salvar Planta</button>
+          <button class="btn btn-secondary" onclick="exportPlantPNG()">🖼️ Exportar Sprite PNG</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetPlantGenes()">🔄 Reset</button>
+        </footer>
+      </main>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       PÁGINA 4: CONFIGURAÇÃO DE MUNDOS NOVOS
+  ═════════════════════════════════════════════════ -->
+  <section id="page-world" class="page">
+    <div class="content">
+      <div class="world-container">
+
+        <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;">🌍 Configurar Novo Mundo</h2>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:24px;">
+          Selecione o bioma base, defina os parâmetros ambientais e selecione as espécies iniciais criadas que habitarão o ecossistema.
+        </p>
+
+        <!-- 1. BIOMAS -->
+        <p style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;">
+          1. Escolha o Bioma Inicial
+        </p>
+        <div class="world-grid" id="world-grid"></div>
+
+        <!-- 2. PARÂMETROS AMBIENTAIS -->
+        <div class="world-config">
+          <h3>2. Parâmetros Ambientais</h3>
+
+          <div class="cfg-row">
+            <label>Tamanho da Grade 2D</label>
+            <input type="range" id="world-size" min="20" max="300" value="50" step="5" />
+            <span class="cfg-val" id="world-size-val">50</span>
+            <span class="cfg-unit">células</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>Duração das Estações</label>
+            <input type="range" id="world-season-length" min="30" max="360" value="120" step="10" />
+            <span class="cfg-val" id="world-season-length-val">120</span>
+            <span class="cfg-unit">ticks</span>
+          </div>
+        </div>
+
+        <!-- 3. INDIVÍDUOS POR ESPÉCIE & CALIBRAÇÃO TRÓFICA -->
+        <div class="world-config">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <h3 style="margin:0;">3. Quantidade de Indivíduos por Espécie</h3>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="autoBalanceTrophicPopulations()" style="border-color:var(--accent);color:var(--accent);">
+                ⚖️ Auto-Equilíbrio Trófico
+              </button>
+            </div>
+            <div style="display:flex;gap:12px;font-size:12px;">
+              <span>🦊 Total Animais: <strong id="total-animals-badge" style="color:var(--accent);">0</strong></span>
+              <span>🌿 Total Plantas: <strong id="total-plants-badge" style="color:var(--accent);">0</strong></span>
+            </div>
+          </div>
+
+          <!-- SUB-SEÇÃO: ANIMAIS -->
+          <div class="species-population-section" style="margin-bottom:24px;">
+            <div class="species-section-header">
+              <div class="species-section-title">
+                <span>🦊 População de Animais</span>
+                <span class="species-total-badge" id="subtotal-animals-badge">0 indivíduos</span>
+              </div>
+              <div class="species-quick-actions">
+                <button type="button" class="btn-mini" onclick="adjustAllSpeciesCounts('animal', 5)">+5 Todos</button>
+                <button type="button" class="btn-mini" onclick="adjustAllSpeciesCounts('animal', -5)">-5 Todos</button>
+                <button type="button" class="btn-mini" onclick="resetSpeciesCountsToDefault('animal')">Padrão</button>
+                <button type="button" class="btn-mini" onclick="zeroAllSpeciesCounts('animal')">Zerar</button>
+              </div>
+            </div>
+            <div class="species-count-list" id="world-animals-counts-list"></div>
+          </div>
+
+          <!-- SUB-SEÇÃO: PLANTAS -->
+          <div class="species-population-section">
+            <div class="species-section-header">
+              <div class="species-section-title">
+                <span>🌿 População de Plantas</span>
+                <span class="species-total-badge" id="subtotal-plants-badge">0 vegetais</span>
+              </div>
+              <div class="species-quick-actions">
+                <button type="button" class="btn-mini" onclick="adjustAllSpeciesCounts('plant', 10)">+10 Todas</button>
+                <button type="button" class="btn-mini" onclick="adjustAllSpeciesCounts('plant', -10)">-10 Todas</button>
+                <button type="button" class="btn-mini" onclick="resetSpeciesCountsToDefault('plant')">Padrão</button>
+                <button type="button" class="btn-mini" onclick="zeroAllSpeciesCounts('plant')">Zerar</button>
+              </div>
+            </div>
+            <div class="species-count-list" id="world-plants-counts-list"></div>
+          </div>
+
+        </div>
+
+        <!-- BOTÃO DE INICIAR -->
+        <div style="display:flex;justify-content:center;padding:10px 0 30px;">
+          <button class="btn btn-primary" style="font-size:15px;padding:12px 36px;" onclick="saveAndStartWorld()">
+            🚀 Iniciar Simulação Agora
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       PÁGINA 5: SIMULAÇÃO ECOLÓGICA EM TEMPO REAL
+  ═════════════════════════════════════════════════ -->
+  <section id="page-simulation" class="page">
+    <!-- BARRA DE CONTROLE DA SIMULAÇÃO -->
+    <div class="sim-header">
+      <div class="sim-controls">
+        <button id="btn-sim-play" class="btn btn-secondary btn-sm" onclick="togglePlayPause()">
+          ⏸️ Pausar
+        </button>
+
+        <div class="speed-group">
+          <button class="speed-btn active" data-speed="1" onclick="setSimSpeed(1)">1x</button>
+          <button class="speed-btn" data-speed="2" onclick="setSimSpeed(2)">2x</button>
+          <button class="speed-btn" data-speed="5" onclick="setSimSpeed(5)">5x</button>
+          <button class="speed-btn" data-speed="10" onclick="setSimSpeed(10)">10x</button>
+        </div>
+
+        <!-- CONTROLES DE ZOOM E CÂMERA -->
+        <div class="zoom-group">
+          <button class="btn btn-secondary btn-sm" onclick="simCamera.zoomOut()" title="Diminuir Zoom">🔍 -</button>
+          <span class="zoom-badge" id="sim-zoom-badge">100%</span>
+          <button class="btn btn-secondary btn-sm" onclick="simCamera.zoomIn()" title="Aumentar Zoom">🔍 +</button>
+          <button class="btn btn-secondary btn-sm" onclick="simCamera.fitToScreen()" title="Enquadrar Mapa">⛶ Ajustar</button>
+          <button class="btn btn-secondary btn-sm" onclick="simCamera.resetZoom()" title="Tamanho Real (100%)">1:1</button>
+        </div>
+
+        <button class="btn btn-secondary btn-sm" onclick="analyticsModal.open('phylo')">
+          🌳 Árvore Filogenética
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="analyticsModal.open('pop')">
+          📊 Gráficos & Mutações
+        </button>
+
+        <button class="btn btn-secondary btn-sm" onclick="simFastForward()">
+          ⏩ +50 Ticks
+        </button>
+
+        <button class="btn btn-secondary btn-sm" onclick="resetSimulation()">
+          🔄 Reiniciar
+        </button>
+        <!-- BOTÃO DE ATIVAR/DESATIVAR GRADE -->
+        <button id="btn-toggle-grid" class="btn btn-secondary btn-sm active" onclick="engine.toggleGridLines()" title="Ocultar/Exibir Linhas da Grade">
+          🔲 Grade
+        </button>
+      </div>
+
+      <div class="sim-badges">
+        <span class="sim-badge" id="sim-season-badge">🌸 Primavera</span>
+        <span class="sim-badge" id="sim-gen-badge">Geração 1</span>
+      </div>
+
+      <div class="sim-stats-strip">
+        <span>🦊 Vivos: <strong id="stat-animals-count">0</strong></span>
+        <span>🌿 Plantas: <strong id="stat-plants-count">0</strong></span>
+        <span>🥩 Carcaças: <strong id="stat-carcasses-count">0</strong></span>
+      </div>
+
+      <button class="btn-back" onclick="showPage('menu')">← Menu</button>
+    </div>
+
+    <!-- CORPO DA SIMULAÇÃO -->
+    <div class="sim-body">
+      <!-- ÁREA DE CANVAS 2D -->
+      <div class="sim-canvas-area">
+        <canvas id="sim-canvas"></canvas>
+      </div>
+
+      <!-- PAINEL LATERAL DE INSPEÇÃO E LEGENDA -->
+      <aside class="sim-sidebar">
+        <h3>🔍 Inspetor de Entidades</h3>
+        <div class="inspector-card" id="sim-inspector">
+          <span style="color:var(--text-dim);font-size:12px;">Clique em um animal ou planta na tela para inspecionar seus genes, energia e comportamento em tempo real.</span>
+        </div>
+
+        <h3 style="margin-top:16px;">📊 Censo por Espécie</h3>
+        <div class="species-census-box" id="sim-species-census">
+          <span style="color:var(--text-dim);font-size:11px;">Carregando censo populacional...</span>
+        </div>
+
+        <h3 style="margin-top:16px;">📖 Guia Ecológico</h3>
+        <div style="font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:8px;line-height:1.4;">
+          <div><strong style="color:var(--text-main);">🌿 Herbívoros:</strong> Buscam plantas para se alimentar. Cuidado com sobrepastoreio: plantas pastadas até a raiz morrem!</div>
+          <div><strong style="color:var(--text-main);">🐺 Carnívoros:</strong> Caçam presas ou comem carcaças. O canibalismo transmite Príons neurodegenerativos.</div>
+          <div><strong style="color:var(--text-main);">🍼 Reprodução:</strong> Requer energia alta e gestação contínua. Em escassez de recursos, fêmeas abortam espontaneamente.</div>
+          <div><strong style="color:var(--text-main);">🥩 Carcaças:</strong> Enriquecem o solo com biomassa que é mineralizada em nitrogênio para as plantas.</div>
+          <div><strong style="color:var(--text-main);">❄️ Estações:</strong> O inverno reduz drasticamente o sol e a chuva, testando a resiliência térmica dos seres.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       MODAL: MINI PAINT INTEGRADO
+  ═════════════════════════════════════════════════ -->
+  <div id="paint-modal" class="paint-modal-overlay">
+    <div class="paint-dialog">
+      <div class="paint-header">
+        <h3 id="paint-modal-title">🎨 Desenhar Componente</h3>
+        <button class="btn-back" onclick="miniPaint.close()">✕ Fechar</button>
+      </div>
+
+      <div class="paint-body">
+        <div class="paint-canvas-wrapper">
+          <canvas id="paint-canvas"></canvas>
+        </div>
+
+        <div class="paint-toolbox">
+          <div>
+            <div class="paint-toolbox-title">Ferramentas</div>
+            <div class="paint-tools-row">
+              <button class="paint-tool-btn active" data-tool="brush" onclick="miniPaint.setTool('brush')">
+                ✏️ Pincel
+              </button>
+              <button class="paint-tool-btn" data-tool="eraser" onclick="miniPaint.setTool('eraser')">
+                🧽 Borracha
+              </button>
+              <button class="paint-tool-btn" data-tool="fill" onclick="miniPaint.setTool('fill')">
+                🪣 Balde
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div class="paint-toolbox-title">Espessura do Traço</div>
+            <div class="paint-sizes-row">
+              <button class="paint-size-btn" data-size="1" onclick="miniPaint.setBrushSize(1)">1px</button>
+              <button class="paint-size-btn active" data-size="3" onclick="miniPaint.setBrushSize(3)">3px</button>
+              <button class="paint-size-btn" data-size="6" onclick="miniPaint.setBrushSize(6)">6px</button>
+              <button class="paint-size-btn" data-size="12" onclick="miniPaint.setBrushSize(12)">12px</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="paint-toolbox-title">Paleta de Cores</div>
+            <div class="paint-palette">
+              <div class="paint-palette-color" style="background:#3fb950" data-color="#3fb950" onclick="miniPaint.setColor('#3fb950')"></div>
+              <div class="paint-palette-color" style="background:#238636" data-color="#238636" onclick="miniPaint.setColor('#238636')"></div>
+              <div class="paint-palette-color" style="background:#8b5a2b" data-color="#8b5a2b" onclick="miniPaint.setColor('#8b5a2b')"></div>
+              <div class="paint-palette-color" style="background:#4a2c11" data-color="#4a2c11" onclick="miniPaint.setColor('#4a2c11')"></div>
+              <div class="paint-palette-color" style="background:#f78166" data-color="#f78166" onclick="miniPaint.setColor('#f78166')"></div>
+              <div class="paint-palette-color" style="background:#da3633" data-color="#da3633" onclick="miniPaint.setColor('#da3633')"></div>
+              <div class="paint-palette-color" style="background:#ffa657" data-color="#ffa657" onclick="miniPaint.setColor('#ffa657')"></div>
+              <div class="paint-palette-color" style="background:#e3b341" data-color="#e3b341" onclick="miniPaint.setColor('#e3b341')"></div>
+              <div class="paint-palette-color" style="background:#79c0ff" data-color="#79c0ff" onclick="miniPaint.setColor('#79c0ff')"></div>
+              <div class="paint-palette-color" style="background:#1f6feb" data-color="#1f6feb" onclick="miniPaint.setColor('#1f6feb')"></div>
+              <div class="paint-palette-color" style="background:#d2a8ff" data-color="#d2a8ff" onclick="miniPaint.setColor('#d2a8ff')"></div>
+              <div class="paint-palette-color" style="background:#ffffff" data-color="#ffffff" onclick="miniPaint.setColor('#ffffff')"></div>
+              <div class="paint-palette-color" style="background:#8b949e" data-color="#8b949e" onclick="miniPaint.setColor('#8b949e')"></div>
+              <div class="paint-palette-color" style="background:#0d1117" data-color="#0d1117" onclick="miniPaint.setColor('#0d1117')"></div>
+            </div>
+            <div class="paint-color-custom">
+              <input type="color" id="paint-color-picker" value="#3fb950" />
+              <span style="font-size:11px;color:var(--text-muted);">Cor personalizada</span>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <button class="btn btn-secondary btn-sm" onclick="miniPaint.undo()">↩️ Desfazer</button>
+            <button class="btn btn-danger btn-sm" onclick="miniPaint.clear()">🗑️ Limpar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="paint-footer">
+        <button class="btn btn-secondary btn-sm" onclick="miniPaint.close()">Cancelar</button>
+        <button class="btn btn-primary" onclick="miniPaint.apply()">
+          💾 Aplicar ao Componente
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       MODAL DE EXTINÇÃO POPULACIONAL (3 OPÇÕES CLARAS)
+  ═════════════════════════════════════════════════ -->
+  <div id="extinction-modal" class="extinction-modal-overlay">
+    <div class="extinction-dialog">
+      <h2>⚠️ Extinção de População</h2>
+      <p>
+        Todos os animais do ecossistema sucumbiram na <strong id="extinction-gen">1</strong>ª geração (após <span id="extinction-ticks">0</span> ticks de simulação).
+        O colapso da teia trófica encerrou esta linhagem viva. O que deseja fazer a seguir?
+      </p>
+      <div class="extinction-actions">
+        <button class="btn btn-primary" onclick="goToWorldCreatorFromExtinction()">
+          🌍 Criar Novo Mundo
+        </button>
+        <button class="btn btn-secondary" onclick="resetSimulationFromExtinction()">
+          🔄 Reiniciar Mundo
+        </button>
+        <button class="btn btn-secondary" onclick="viewAnalyticsFromExtinction()">
+          📊 Observar Gráficos & Linhagens
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       MODAL DE CIÊNCIA: ÁRVORE FILOGENÉTICA E GRÁFICOS
+  ═════════════════════════════════════════════════ -->
+  <div id="analytics-modal" class="analytics-modal-overlay">
+    <div class="analytics-dialog">
+      <div class="analytics-header">
+        <div class="analytics-tabs">
+          <button class="analytics-tab-btn active" data-tab="phylo" onclick="analyticsModal.switchTab('phylo')">
+            🌳 Árvore Filogenética
+          </button>
+          <button class="analytics-tab-btn" data-tab="pop" onclick="analyticsModal.switchTab('pop')">
+            📈 Dinâmica Populacional
+          </button>
+          <button class="analytics-tab-btn" data-tab="genes" onclick="analyticsModal.switchTab('genes')">
+            🧬 Trajetória de Genes & Mutações
+          </button>
+        </div>
+
+        <div id="analytics-gene-selector-wrap" style="display:none;align-items:center;gap:8px;margin-left:auto;margin-right:16px;">
+          <span style="font-size:11px;color:var(--text-muted);">Espécie:</span>
+          <select id="analytics-gene-species-select" onchange="analyticsModal.onGeneSpeciesChange(this.value)" class="analytics-select"></select>
+        </div>
+
+        <button class="btn-back" onclick="analyticsModal.close()">✕ Fechar</button>
+      </div>
+
+      <div class="analytics-body">
+        <canvas id="analytics-canvas" width="860" height="460"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST DE FEEDBACK -->
+  <div id="toast"></div>
+
+  <!-- SCRIPTS DO SISTEMA -->
+  <script src="js/renderer.js"></script>
+  <script src="js/paint.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
