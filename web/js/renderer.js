@@ -35,11 +35,15 @@ const ImageCache = {
  * Se houver imagens em customImages (body, limbs, jaw, eyes, detail),
  * usa as imagens importadas escalando-as dinamicamente pelos genes.
  */
-function drawCreature(ctx, genes, cx, cy, scale = 1, customImages = {}, onImgLoaded = null) {
+function drawCreature(ctx, genes = {}, cx = 0, cy = 0, scale = 1, customImages = {}, onImgLoaded = null) {
+  if (!ctx) return;
+  genes = genes || {};
+  customImages = customImages || {};
+
   const {
     size = 0.5,
-    carnivore = 0.3,
-    plant = 0.6,
+    carnivore = (genes.diet?.meat ?? 0.3),
+    plant = (genes.diet?.plant ?? 0.6),
     speed = 0.5,
     perception = 0.5,
     health = 0.5,
@@ -248,7 +252,11 @@ function drawCreature(ctx, genes, cx, cy, scale = 1, customImages = {}, onImgLoa
  * Desenha uma Planta botânica no Canvas.
  * Suporta imagens customizadas para (roots, stem, leaves, thorns, fruit).
  */
-function drawPlant(ctx, genes, cx, cy, scale = 1, customImages = {}, onImgLoaded = null) {
+function drawPlant(ctx, genes = {}, cx = 0, cy = 0, scale = 1, customImages = {}, onImgLoaded = null) {
+  if (!ctx) return;
+  genes = genes || {};
+  customImages = customImages || {};
+
   const {
     height = 0.5,
     rootEfficiency = 0.5,

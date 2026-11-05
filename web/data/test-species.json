@@ -1,0 +1,61 @@
+{
+  "testName": "Teste de controle populacional equilibrado",
+  "activeTest": "A",
+  "tests": [
+    {
+      "id": "A",
+      "description": "População inicial equilibrada",
+      "animals": {
+        "starter_rabbit": 77,
+        "starter_wolf": 23
+      },
+      "plants": {
+        "starter_grass": 110
+      }
+    },
+    {
+      "id": "B",
+      "description": "População intermediária",
+      "animals": {
+        "starter_rabbit": 308,
+        "starter_wolf": 92
+      },
+      "plants": {
+        "starter_grass": 250
+      }
+    },
+    {
+      "id": "C",
+      "description": "Redução gradual da reprodução",
+      "animals": {
+        "starter_rabbit": 354,
+        "starter_wolf": 106
+      },
+      "plants": {
+        "starter_grass": 280
+      }
+    },
+    {
+      "id": "D",
+      "description": "Limite de bloqueio reprodutivo",
+      "animals": {
+        "starter_rabbit": 393,
+        "starter_wolf": 117
+      },
+      "plants": {
+        "starter_grass": 310
+      }
+    },
+    {
+      "id": "E",
+      "description": "Proximidade do limite absoluto",
+      "animals": {
+        "starter_rabbit": 454,
+        "starter_wolf": 136
+      },
+      "plants": {
+        "starter_grass": 360
+      }
+    }
+  ]
+}

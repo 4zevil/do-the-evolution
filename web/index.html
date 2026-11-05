@@ -35,6 +35,9 @@
       <button class="nav-tab-btn" data-page="simulation" onclick="showPage('simulation')" style="color:var(--accent);">
         🎮 Simulação
       </button>
+      <button class="nav-tab-btn" data-page="console" onclick="showPage('console')" style="color:var(--accent-purp);">
+        📟 Console
+      </button>
     </nav>
   </header>
 
@@ -74,6 +77,13 @@
         <span class="card-icon">🌍</span>
         <h3>Configurar Mundo</h3>
         <p>Escolha o bioma, o tamanho da grade e selecione as espécies que habitarão o ecossistema.</p>
+      </div>
+
+      <!-- Card Console -->
+      <div class="menu-card" style="--card-accent:#d2a8ff" onclick="showPage('console')">
+        <span class="card-icon">📟</span>
+        <h3>Console & Diagnósticos</h3>
+        <p>Veja métricas de densidade, vegetação, energia e logs ao vivo sem inspecionar a aba.</p>
       </div>
     </div>
   </main>
@@ -614,6 +624,22 @@
               <span>🦊 Total Animais: <strong id="total-animals-badge" style="color:var(--accent);">0</strong></span>
               <span>🌿 Total Plantas: <strong id="total-plants-badge" style="color:var(--accent);">0</strong></span>
             </div>
+            <!-- PAINEL DE TESTES POPULACIONAIS -->
+<div style="display:flex;align-items:center;gap:12px;margin:16px 0;padding:12px;border:1px solid var(--border);border-radius:8px;">
+  <label for="test-profile-select">Perfil de teste:</label>
+
+  <select id="test-profile-select">
+    <option value="A">A - 100 animais</option>
+    <option value="B">B - 400 animais</option>
+    <option value="C">C - 460 animais</option>
+    <option value="D">D - 510 animais</option>
+    <option value="E">E - 590 animais</option>
+  </select>
+
+  <button type="button" class="btn-mini" onclick="applyTestSpeciesProfile()">
+    Aplicar teste
+  </button>
+</div>
           </div>
 
           <!-- SUB-SEÇÃO: ANIMAIS -->
@@ -650,6 +676,48 @@
             <div class="species-count-list" id="world-plants-counts-list"></div>
           </div>
 
+        </div>
+
+        <!-- 4. PARÂMETROS DE EVOLUÇÃO E EQUILÍBRIO -->
+        <div class="world-config" style="margin-top:0;">
+          <h3>4. Parâmetros de Evolução &amp; Equilíbrio</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Configure a intensidade da evolução e os mecanismos de regulação ecológica. Podem ser ajustados durante a simulação via aba Console do painel lateral.</p>
+
+          <div class="cfg-row">
+            <label>🧬 Multiplicador de Mutações</label>
+            <input type="range" id="world-mutation-rate" min="0.5" max="3.0" step="0.1" value="1.0"
+              oninput="document.getElementById('world-mutation-rate-val').textContent = parseFloat(this.value).toFixed(1) + 'x'" />
+            <span class="cfg-val" id="world-mutation-rate-val">1.0x</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>🥩 Saciedade dos Predadores</label>
+            <input type="range" id="world-predator-satiety" min="40" max="95" step="5" value="65"
+              oninput="document.getElementById('world-predator-satiety-val').textContent = this.value + '%'" />
+            <span class="cfg-val" id="world-predator-satiety-val">65%</span>
+            <span class="cfg-unit">de energia</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>🌱 Taxa do Banco de Sementes</label>
+            <input type="range" id="world-seed-bank" min="0" max="40" step="2" value="14"
+              oninput="document.getElementById('world-seed-bank-val').textContent = this.value + '%'" />
+            <span class="cfg-val" id="world-seed-bank-val">14%</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>⚖️ Homeostase Automática</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" id="world-auto-homeostasis" checked style="width:16px;height:16px;" />
+              <span id="world-auto-homeostasis-label" style="color:var(--accent);">Ativada</span>
+            </label>
+          </div>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyWorldEvoPreset('sustainable')" style="border-color:var(--accent);color:var(--accent);">🟢 Equilíbrio Estável</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyWorldEvoPreset('fast-evolution')">⚡ Evolução Acelerada</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyWorldEvoPreset('hardcore')">🦁 Mundo Selvagem</button>
+          </div>
         </div>
 
         <!-- BOTÃO DE INICIAR -->
@@ -697,6 +765,10 @@
           📊 Gráficos & Mutações
         </button>
 
+        <button class="btn btn-secondary btn-sm" onclick="showPage('console')" title="Abrir Console do Sistema e Diagnósticos">
+          📟 Console
+        </button>
+
         <button class="btn btn-secondary btn-sm" onclick="simFastForward()">
           ⏩ +50 Ticks
         </button>
@@ -731,27 +803,513 @@
         <canvas id="sim-canvas"></canvas>
       </div>
 
-      <!-- PAINEL LATERAL DE INSPEÇÃO E LEGENDA -->
+      <!-- PAINEL LATERAL COM ABAS: INSPETOR | CENSO | CONSOLE -->
       <aside class="sim-sidebar">
-        <h3>🔍 Inspetor de Entidades</h3>
-        <div class="inspector-card" id="sim-inspector">
-          <span style="color:var(--text-dim);font-size:12px;">Clique em um animal ou planta na tela para inspecionar seus genes, energia e comportamento em tempo real.</span>
+        <!-- TABS NAVEGAÇÃO LATERAL -->
+        <div class="sidebar-tabs">
+          <button class="sidebar-tab active" data-sidepanel="inspector" onclick="switchSidePanel('inspector')">🔍 Inspetor</button>
+          <button class="sidebar-tab" data-sidepanel="census" onclick="switchSidePanel('census')">📊 Censo</button>
+          <button class="sidebar-tab" data-sidepanel="console" onclick="switchSidePanel('console')">📟 Console</button>
         </div>
 
-        <h3 style="margin-top:16px;">📊 Censo por Espécie</h3>
-        <div class="species-census-box" id="sim-species-census">
-          <span style="color:var(--text-dim);font-size:11px;">Carregando censo populacional...</span>
+        <!-- PAINEL 1: INSPETOR -->
+        <div id="sidepanel-inspector" class="sidepanel active">
+          <div class="inspector-card" id="sim-inspector">
+            <span style="color:var(--text-dim);font-size:12px;">Clique em um animal ou planta na tela para inspecionar seus genes, energia e comportamento em tempo real.</span>
+          </div>
+          <h3 style="margin-top:16px;font-size:12px;color:var(--text-dim);">📖 Guia Ecológico</h3>
+          <div style="font-size:11px;color:var(--text-muted);display:flex;flex-direction:column;gap:6px;line-height:1.4;">
+            <div><strong style="color:var(--text-main);">🌿 Herbívoros:</strong> Buscam plantas. Sobrepastoreio mata raízes!</div>
+            <div><strong style="color:var(--text-main);">🐺 Carnívoros:</strong> Caçam presas ou comem carcaças. Canibalismo transmite Príons.</div>
+            <div><strong style="color:var(--text-main);">🍼 Reprodução:</strong> Requer energia alta. Inanição causa aborto.</div>
+            <div><strong style="color:var(--text-main);">🥩 Carcaças:</strong> Mineralizam nitrogênio para as plantas.</div>
+            <div><strong style="color:var(--text-main);">❄️ Estações:</strong> Inverno testa resiliência térmica dos seres.</div>
+          </div>
         </div>
 
-        <h3 style="margin-top:16px;">📖 Guia Ecológico</h3>
-        <div style="font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:8px;line-height:1.4;">
-          <div><strong style="color:var(--text-main);">🌿 Herbívoros:</strong> Buscam plantas para se alimentar. Cuidado com sobrepastoreio: plantas pastadas até a raiz morrem!</div>
-          <div><strong style="color:var(--text-main);">🐺 Carnívoros:</strong> Caçam presas ou comem carcaças. O canibalismo transmite Príons neurodegenerativos.</div>
-          <div><strong style="color:var(--text-main);">🍼 Reprodução:</strong> Requer energia alta e gestação contínua. Em escassez de recursos, fêmeas abortam espontaneamente.</div>
-          <div><strong style="color:var(--text-main);">🥩 Carcaças:</strong> Enriquecem o solo com biomassa que é mineralizada em nitrogênio para as plantas.</div>
-          <div><strong style="color:var(--text-main);">❄️ Estações:</strong> O inverno reduz drasticamente o sol e a chuva, testando a resiliência térmica dos seres.</div>
+        <!-- PAINEL 2: CENSO -->
+        <div id="sidepanel-census" class="sidepanel" style="display:none;">
+          <div class="species-census-box" id="sim-species-census">
+            <span style="color:var(--text-dim);font-size:11px;">Carregando censo populacional...</span>
+          </div>
+        </div>
+
+        <!-- PAINEL 3: CONSOLE DE DIAGNÓSTICOS (atualiza a cada 100 ticks) -->
+        <div id="sidepanel-console" class="sidepanel" style="display:none;">
+          <div class="side-console-header">
+            <span id="side-console-tick-badge" style="font-size:11px;color:var(--accent);">Ciclo: 0</span>
+            <span style="font-size:10px;color:var(--text-dim);">Atualiza a cada 100 ticks</span>
+          </div>
+
+          <!-- MÉTRICAS RÁPIDAS EM CARDS COMPACTOS -->
+          <div class="side-diag-grid">
+            <div class="side-diag-card" style="--sc:#3fb950;">
+              <div class="side-diag-label">🌿 Plantas</div>
+              <div class="side-diag-val" id="sc-plants">0</div>
+            </div>
+            <div class="side-diag-card" style="--sc:#79c0ff;">
+              <div class="side-diag-label">🦊 Animais</div>
+              <div class="side-diag-val" id="sc-animals">0</div>
+            </div>
+            <div class="side-diag-card" style="--sc:#ffa657;">
+              <div class="side-diag-label">🌾 Herbívoros</div>
+              <div class="side-diag-val" id="sc-herbivores">0</div>
+            </div>
+            <div class="side-diag-card" style="--sc:#f78166;">
+              <div class="side-diag-label">🐺 Carnívoros</div>
+              <div class="side-diag-val" id="sc-carnivores">0</div>
+            </div>
+            <div class="side-diag-card" style="--sc:#d2a8ff;">
+              <div class="side-diag-label">⚡ E.Média</div>
+              <div class="side-diag-val" id="sc-avg-energy">—</div>
+            </div>
+            <div class="side-diag-card" style="--sc:#e3b341;">
+              <div class="side-diag-label">🏹 Abates/100t</div>
+              <div class="side-diag-val" id="sc-kills">0</div>
+            </div>
+          </div>
+
+          <!-- LOG DE EVENTOS COMPACTO -->
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column;">
+            <div style="font-size:11px;font-weight:700;color:var(--text-dim);margin-bottom:6px;flex-shrink:0;">📜 Log de Eventos</div>
+            <div id="side-console-log" style="font-size:10px;color:var(--text-muted);flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;"></div>
+          </div>
         </div>
       </aside>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       PÁGINA 6: CONSOLE DO SISTEMA & DIAGNÓSTICOS EM TEMPO REAL
+  ═════════════════════════════════════════════════ -->
+  <section id="page-console" class="page">
+    <div class="console-header">
+      <div class="console-title-wrap">
+        <span class="console-title-icon">📟</span>
+        <div>
+          <h2>Console do Sistema & Diagnósticos</h2>
+          <p class="console-subtitle">Monitore métricas da vegetação, densidade, energia, IA e controle o equilíbrio ecológico em tempo real sem inspecionar.</p>
+        </div>
+      </div>
+
+      <div class="console-sim-bar">
+        <button id="btn-console-play" class="btn btn-secondary btn-sm" onclick="togglePlayPause()">
+          ⏸️ Pausar
+        </button>
+        <div class="speed-group">
+          <button class="speed-btn console-speed-btn active" data-speed="1" onclick="setSimSpeed(1)">1x</button>
+          <button class="speed-btn console-speed-btn" data-speed="2" onclick="setSimSpeed(2)">2x</button>
+          <button class="speed-btn console-speed-btn" data-speed="5" onclick="setSimSpeed(5)">5x</button>
+          <button class="speed-btn console-speed-btn" data-speed="10" onclick="setSimSpeed(10)">10x</button>
+        </div>
+
+        <div class="sim-badges">
+          <span class="sim-badge" id="console-season-badge">🌸 Primavera</span>
+          <span class="sim-badge" id="console-gen-badge">Geração 1</span>
+          <span class="sim-badge" id="console-tick-badge">Ciclo: 0</span>
+        </div>
+
+        <div class="sim-stats-strip">
+          <span>🦊 <strong id="console-stat-animals">0</strong></span>
+          <span>🌿 <strong id="console-stat-plants">0</strong></span>
+          <span>🥩 <strong id="console-stat-carcasses">0</strong></span>
+        </div>
+
+        <button class="btn btn-primary btn-sm" onclick="showPage('simulation')">
+          🎮 Ir para Simulação
+        </button>
+      </div>
+    </div>
+
+    <!-- SUB-NAVEGAÇÃO DAS OPÇÕES DE CONSOLE -->
+    <div class="console-subnav">
+      <button class="console-tab-btn active" data-subtab="dashboard">
+        📊 Painel de Diagnósticos
+      </button>
+      <button class="console-tab-btn" data-subtab="terminal">
+        📜 Terminal / Log em Tempo Real
+      </button>
+      <button class="console-tab-btn" data-subtab="balance">
+        🎛️ Opções de Equilíbrio & Evolução
+      </button>
+    </div>
+
+    <div class="console-content-container">
+
+      <!-- SUB-ABA 1: PAINEL DE DIAGNÓSTICOS EM CARDS -->
+      <div id="console-subview-dashboard" class="console-subview">
+        <div class="diag-cards-grid">
+
+          <!-- CARD 1: VEGETAÇÃO -->
+          <div class="diag-card" style="--card-color: #3fb950;">
+            <div class="diag-card-header">
+              <span class="diag-icon">🌿</span>
+              <h3>Dinâmica da Vegetação</h3>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-row">
+                <span>Plantas Vivas no Mapa:</span>
+                <strong class="val-highlight" id="diag-plants-alive">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Plantas Reproduzidas:</span>
+                <strong id="diag-plants-repro">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes por Falta de Nutrientes:</span>
+                <strong class="val-warn" id="diag-plants-nutrient-deaths">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes por Idade / Senescência:</span>
+                <strong id="diag-plants-age-deaths">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes por Enchentes:</span>
+                <strong id="diag-plants-flood-deaths">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Remoções por Pastoreio (Raiz Arrancada):</span>
+                <strong class="val-danger" id="diag-plants-grazing-deaths">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Ciclos com Crescimento Ativo:</span>
+                <strong class="val-success" id="diag-plants-growth-active">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Crescimento Bloqueado (Falta Nitrogênio):</span>
+                <strong class="val-warn" id="diag-plants-growth-blocked">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 2: DENSIDADE & POPULAÇÃO -->
+          <div class="diag-card" style="--card-color: #79c0ff;">
+            <div class="diag-card-header">
+              <span class="diag-icon">👥</span>
+              <h3>Densidade Populacional & Biometria</h3>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-row">
+                <span>População Total:</span>
+                <strong class="val-highlight" id="diag-pop-total">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Herbívoros / Onívoros:</span>
+                <strong class="val-success" id="diag-pop-herbivores">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Carnívoros / Predadores:</span>
+                <strong class="val-danger" id="diag-pop-carnivores">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Média de Vizinhos Próximos:</span>
+                <strong id="diag-pop-avg-neighbors">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Máximo de Vizinhos Agrupados:</span>
+                <strong id="diag-pop-max-neighbors">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Animais Aglomerados (>2 vizinhos):</span>
+                <strong id="diag-pop-above-two">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Superlotação Severa (>4 vizinhos):</span>
+                <strong class="val-warn" id="diag-pop-above-four">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Porte Carnívoros (Mín / Méd / Máx):</span>
+                <span><strong id="diag-pop-min-carn-size">0</strong> / <strong id="diag-pop-avg-carn-size">0</strong> / <strong id="diag-pop-max-carn-size">0</strong></span>
+              </div>
+              <div class="diag-row">
+                <span>Animais Infectados / Doentes:</span>
+                <strong class="val-purp" id="diag-pop-diseased">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 3: BALANÇO ENERGÉTICO -->
+          <div class="diag-card" style="--card-color: #ffa657;">
+            <div class="diag-card-header">
+              <span class="diag-icon">⚡</span>
+              <h3>Balanço Energético</h3>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-row">
+                <span>Energia Média Geral:</span>
+                <strong class="val-highlight" id="diag-energy-avg-gen">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Energia Média dos Herbívoros:</span>
+                <strong class="val-success" id="diag-energy-avg-herb">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Energia Média dos Carnívoros:</span>
+                <strong class="val-danger" id="diag-energy-avg-carn">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Animais em Estado Crítico (Energia &lt; 25):</span>
+                <strong class="val-danger" id="diag-energy-critical">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Animais Doentes em Estado Crítico:</span>
+                <strong class="val-purp" id="diag-energy-critical-sick">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 4: MORTALIDADE -->
+          <div class="diag-card" style="--card-color: #f78166;">
+            <div class="diag-card-header">
+              <span class="diag-icon">💀</span>
+              <h3>Mortalidade Acumulada</h3>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-row">
+                <span>Mortes por Falta de Energia (Fome):</span>
+                <strong class="val-danger" id="diag-mort-energy">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes por Idade / Senescência:</span>
+                <strong id="diag-mort-age">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes de Animais Saudáveis:</span>
+                <strong id="diag-mort-healthy">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes de Animais Infectados / Doentes:</span>
+                <strong class="val-purp" id="diag-mort-sick">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes Juvenis (&lt; 50 ciclos):</span>
+                <strong class="val-warn" id="diag-mort-juvenile">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mortes Adultas (&ge; 50 ciclos):</span>
+                <strong id="diag-mort-adult">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 5: IA & COMPORTAMENTO -->
+          <div class="diag-card" style="--card-color: #d2a8ff;">
+            <div class="diag-card-header">
+              <span class="diag-icon">🧠</span>
+              <h3>IA & Comportamento Trófico</h3>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-row">
+                <span>Percepção Visual Média (Herbívoros):</span>
+                <strong id="diag-ai-herb-vision-avg">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Percepção Visual Máxima (Herbívoros):</span>
+                <strong class="val-highlight" id="diag-ai-herb-vision-max">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Percepção Visual Média (Predadores):</span>
+                <strong id="diag-ai-pred-vision-avg">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Eventos de Fuga Bem-Sucedidos:</span>
+                <strong class="val-success" id="diag-ai-flee-events">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Refeições Herbívoras Realizadas:</span>
+                <strong id="diag-ai-herb-meals">0</strong>
+              </div>
+              <div class="diag-row">
+                <span>Refeições de Carcaças (Herbívoro / Carnívoro):</span>
+                <span><strong id="diag-ai-herb-carcass-meals">0</strong> / <strong id="diag-ai-carn-carcass-meals">0</strong></span>
+              </div>
+              <div class="diag-row">
+                <span>Abates de Outras Espécies (Presas / Carnívoros):</span>
+                <span><strong id="diag-ai-kills-prey">0</strong> / <strong id="diag-ai-kills-carn">0</strong></span>
+              </div>
+              <div class="diag-row">
+                <span>Ataques Canibais &amp; Infecções por Príon:</span>
+                <span><strong class="val-danger" id="diag-ai-cannibal">0</strong> / <strong class="val-purp" id="diag-ai-prion">0</strong></span>
+              </div>
+              <div class="diag-row">
+                <span>Distância Média de Localização de Carcaças:</span>
+                <strong id="diag-ai-carcass-dist-avg">0</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 6: SOLO & NITROGÊNIO -->
+          <div class="diag-card" style="--card-color: #e3b341;">
+            <div class="diag-card-header">
+              <span class="diag-icon">🧪</span>
+              <h3>Fertilidade do Solo por Bioma</h3>
+            </div>
+            <div class="diag-card-body">
+              <table class="diag-table">
+                <thead>
+                  <tr>
+                    <th>Bioma</th>
+                    <th>Células</th>
+                    <th>N Médio</th>
+                    <th>Mín</th>
+                    <th>Máx</th>
+                  </tr>
+                </thead>
+                <tbody id="diag-soil-table-body">
+                  <tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Aguardando primeiro diagnóstico de solo...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- SUB-ABA 2: TERMINAL / LOG EM TEMPO REAL -->
+      <div id="console-subview-terminal" class="console-subview" style="display:none;">
+        <div class="terminal-controls-bar">
+          <div class="terminal-filters">
+            <button class="terminal-filter-btn active" data-filter="all">Todos</button>
+            <button class="terminal-filter-btn" data-filter="vegetation">🌿 Vegetação</button>
+            <button class="terminal-filter-btn" data-filter="density">👥 População</button>
+            <button class="terminal-filter-btn" data-filter="energy">⚡ Energia</button>
+            <button class="terminal-filter-btn" data-filter="mortality">💀 Mortes</button>
+            <button class="terminal-filter-btn" data-filter="ai">🧠 IA</button>
+            <button class="terminal-filter-btn" data-filter="soil">🧪 Solo</button>
+            <button class="terminal-filter-btn" data-filter="evolution">🧬 Evolução</button>
+            <button class="terminal-filter-btn" data-filter="warnings">⚠️ Alertas/Erros</button>
+          </div>
+
+          <div class="terminal-search-wrap">
+            <input type="text" id="console-search-input" placeholder="🔍 Buscar nos logs..." class="console-input" />
+          </div>
+
+          <div class="terminal-actions">
+            <label class="console-checkbox-label">
+              <input type="checkbox" id="console-autoscroll-cb" checked /> Auto-scroll
+            </label>
+            <button class="btn-mini" onclick="systemConsole.copyAllLogs()">📋 Copiar Tudo</button>
+            <button class="btn-mini" onclick="systemConsole.downloadLogs()">⬇️ Baixar (.txt)</button>
+            <button class="btn-mini btn-danger-mini" onclick="systemConsole.clearLogs()">🗑️ Limpar</button>
+          </div>
+        </div>
+
+        <div class="console-terminal-body" id="console-terminal-body">
+          <div id="console-terminal-lines"></div>
+        </div>
+      </div>
+
+      <!-- SUB-ABA 3: OPÇÕES DE EQUILÍBRIO & EVOLUÇÃO -->
+      <div id="console-subview-balance" class="console-subview" style="display:none;">
+        <div class="balance-settings-layout">
+
+          <!-- PRESETS RÁPIDOS -->
+          <div class="balance-section">
+            <h3>⚡ Modos de Equilíbrio & Evolução (1 Clique)</h3>
+            <p class="balance-desc">Aplique configurações recomendadas que combinam sobrevivência estável com contínua especiação e mutação genética.</p>
+            <div class="balance-presets-grid">
+              <div class="balance-preset-card" onclick="systemConsole.applyPreset('sustainable')">
+                <span class="preset-badge-icon">🟢</span>
+                <h4>Equilíbrio Sustentável (Recomendado)</h4>
+                <p>Ciclos de Lotka-Volterra harmônicos: plantas regeneram raízes, presas usam percepção para fugir e predadores saciados descansam. A evolução continua normalmente.</p>
+                <button class="btn btn-primary btn-sm" style="margin-top:10px;">Aplicar Equilíbrio</button>
+              </div>
+
+              <div class="balance-preset-card" onclick="systemConsole.applyPreset('accelerated-evolution')">
+                <span class="preset-badge-icon">⚡</span>
+                <h4>Evolução Acelerada</h4>
+                <p>Taxa de mutações dobrada (2.2x), alta diversificação morfológica e novas espécies surgindo a cada geração com suporte regenerativo ao ecossistema.</p>
+                <button class="btn btn-secondary btn-sm" style="margin-top:10px;">Ativar Evolução Rápida</button>
+              </div>
+
+              <div class="balance-preset-card" onclick="systemConsole.applyPreset('hardcore')">
+                <span class="preset-badge-icon">🦁</span>
+                <h4>Mundo Selvagem (Hardcore)</h4>
+                <p>Sem amortecedores ecológicos ou banco de sementes protegido. Seleção natural crua e impiedosa com risco real de extinção em massa.</p>
+                <button class="btn btn-secondary btn-sm" style="margin-top:10px;">Modo Selvagem</button>
+              </div>
+
+              <div class="balance-preset-card" onclick="systemConsole.applyPreset('emergency-rescue')">
+                <span class="preset-badge-icon">🚑</span>
+                <h4>Socorro Ecológico Imediato</h4>
+                <p>Injeta nitrogênio e umidade no solo, planta novas mudas caso a flora tenha sumido e cura animais doentes para impedir a extinção terminal da rodada atual.</p>
+                <button class="btn btn-secondary btn-sm" style="margin-top:10px;">Executar Resgate</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CONTROLES FINOS -->
+          <div class="balance-section" style="margin-top:24px;">
+            <h3>🎛️ Ajustes Finos dos Mecanismos Ecológicos</h3>
+            <p class="balance-desc">Ajuste parâmetros individuais em tempo real sem precisar reiniciar o mundo.</p>
+
+            <div class="balance-sliders-grid">
+
+              <!-- Auto-Homeostase -->
+              <div class="balance-control-card">
+                <div class="control-header">
+                  <label class="control-title">⚖️ Homeostase Automática</label>
+                  <input type="checkbox" id="setting-auto-homeostasis" onchange="systemConsole.applyBalanceSetting('autoHomeostasis', this.checked)" checked />
+                </div>
+                <p class="control-help">Mantém amortecedores ecológicos dinâmicos (impede que herbívoros exterminem 100% das raízes ou predadores matem presas sem parar).</p>
+              </div>
+
+              <!-- Banco de Sementes -->
+              <div class="balance-control-card">
+                <div class="control-header">
+                  <label class="control-title">🌱 Banco de Sementes no Solo</label>
+                  <span class="control-val" id="val-seed-bank">14%</span>
+                </div>
+                <input type="range" id="setting-seed-bank" min="0" max="40" step="2" value="14" oninput="document.getElementById('val-seed-bank').textContent = this.value + '%'; systemConsole.applyBalanceSetting('seedBankRate', this.value / 100);" />
+                <p class="control-help">Frequência com que o solo fértil gera brotos pioneiros quando a vegetação cai abaixo do limite de segurança.</p>
+              </div>
+
+              <!-- Resiliência ao Pastoreio -->
+              <div class="balance-control-card">
+                <div class="control-header">
+                  <label class="control-title">🛡️ Resiliência Radicular ao Pastoreio</label>
+                  <span class="control-val" id="val-grazing-resilience">85%</span>
+                </div>
+                <input type="range" id="setting-grazing-resilience" min="40" max="100" step="5" value="85" oninput="document.getElementById('val-grazing-resilience').textContent = this.value + '%'; systemConsole.applyBalanceSetting('grazingResilience', this.value / 100);" />
+                <p class="control-help">Porcentagem de preservação das raízes após mordidas. Quanto maior, mais rápido as plantas rebrotam após serem pastadas.</p>
+              </div>
+
+              <!-- Saciedade de Predadores -->
+              <div class="balance-control-card">
+                <div class="control-header">
+                  <label class="control-title">🥩 Saciedade dos Predadores</label>
+                  <span class="control-val" id="val-predator-satiety">65%</span>
+                </div>
+                <input type="range" id="setting-predator-satiety" min="40" max="95" step="5" value="65" oninput="document.getElementById('val-predator-satiety').textContent = this.value + '%'; systemConsole.applyBalanceSetting('predatorSatietyThreshold', this.value / 100);" />
+                <p class="control-help">Predadores com energia acima deste valor descansam em vez de caçar, dando tempo para as presas se multiplicarem.</p>
+              </div>
+
+              <!-- Fuga Dinâmica -->
+              <div class="balance-control-card">
+                <div class="control-header">
+                  <label class="control-title">👁️ Fuga Baseada na Visão da Presa</label>
+                  <span class="control-val" id="val-flee-perception">100%</span>
+                </div>
+                <input type="range" id="setting-flee-perception" min="50" max="200" step="10" value="100" oninput="document.getElementById('val-flee-perception').textContent = this.value + '%'; systemConsole.applyBalanceSetting('fleePerceptionFactor', this.value / 100);" />
+                <p class="control-help">Presas com mutação de maior percepção visual detectam o predador antes e fogem com antecedência, gerando seleção natural real.</p>
+              </div>
+
+              <!-- Taxa de Mutação -->
+              <div class="balance-control-card">
+                <div class="control-header">
+                  <label class="control-title">🧬 Multiplicador de Mutações</label>
+                  <span class="control-val" id="val-mutation-multiplier">1.0x</span>
+                </div>
+                <input type="range" id="setting-mutation-multiplier" min="0.5" max="3.0" step="0.1" value="1.0" oninput="document.getElementById('val-mutation-multiplier').textContent = parseFloat(this.value).toFixed(1) + 'x'; systemConsole.applyBalanceSetting('mutationRateMultiplier', parseFloat(this.value));" />
+                <p class="control-help">Controla a intensidade das mutações a cada reprodução. Valores maiores produzem novas espécies mais rapidamente.</p>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+
     </div>
   </section>
 
@@ -899,6 +1457,7 @@
   <script src="js/renderer.js"></script>
   <script src="js/paint.js"></script>
   <script src="js/simulation.js"></script>
+  <script src="js/console.js"></script>
   <script src="js/analytics.js"></script>
   <script src="js/app.js"></script>
 </body>

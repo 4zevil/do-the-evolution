@@ -18,7 +18,7 @@ function showPage(pageId) {
     btn.classList.toggle('active', btn.dataset.page === pageId);
   });
 
-  if (pageId !== 'simulation' && typeof engine !== 'undefined' && engine.isRunning) {
+  if (pageId !== 'simulation' && pageId !== 'console' && typeof engine !== 'undefined' && engine.isRunning) {
     engine.pause();
     updatePlayPauseButtonUI(false);
   }
@@ -27,6 +27,7 @@ function showPage(pageId) {
   if (pageId === 'plants')  renderPlantPreview();
   if (pageId === 'world')   refreshWorldSpeciesCounts();
   if (pageId === 'simulation') startOrResumeSimulation();
+  if (pageId === 'console' && typeof systemConsole !== 'undefined') systemConsole.onOpen();
 }
 
 function toast(msg, duration = 3000) {
@@ -672,7 +673,7 @@ const STARTER_ANIMALS = [
     genes: {
       size: 0.30,
       diet: { meat: 0.0, plant: 0.95, carcass: 0.05 },
-      speed: 0.80,
+      speed: 0.72,
       perception: 0.65,
       gestation: 0.25,
       offspringCount: 0.80,
@@ -694,7 +695,7 @@ const STARTER_ANIMALS = [
     genes: {
       size: 0.65,
       diet: { meat: 0.85, plant: 0.05, carcass: 0.10 },
-      speed: 0.70,
+      speed: 0.82,
       perception: 0.85,
       gestation: 0.45,
       offspringCount: 0.40,
@@ -988,30 +989,97 @@ function updateWorldSpeciesTotals() {
 
 // ── CALIBRADOR TRÓFICO INTELIGENTE ─────────────────
 // Aplica a Pirâmide Ecológica de Elton, Lindeman (10-18%) e a Lei de Kleiber
+
 function autoBalanceTrophicPopulations() {
   const size = parseInt(document.getElementById('world-size')?.value || 50);
   const cols = Math.min(50, Math.max(20, Math.round(size * 0.75)));
   const rows = Math.min(35, Math.max(15, Math.round(size * 0.5)));
   const totalCells = cols * rows;
 
-  // 1. Produtores Primários (Plantas): Sustentabilidade da área (~22% das células do mapa)
-  const targetPlantTotal = Math.min(110, Math.max(35, Math.round(totalCells * 0.22)));
-  const plantEntries = Object.entries(worldSpeciesSelection.plants);
+  // Distribui uma capacidade entre espécies proporcionalmente à eficiência.
+  // Os limites individuais são respeitados sem ultrapassar a capacidade total.
+  function distributePopulation(species, capacity, maxPerSpecies) {
+    if (species.length === 0) return;
 
-  if (plantEntries.length > 0) {
-    const totalGrowthWeight = plantEntries.reduce((sum, [_, item]) => sum + (item.species.genes.growthSpeed || 0.5), 0) || 1;
-    plantEntries.forEach(([id, item]) => {
-      const weight = (item.species.genes.growthSpeed || 0.5) / totalGrowthWeight;
-      const count = Math.max(8, Math.min(120, Math.round(targetPlantTotal * weight)));
-      setSpeciesCountSlider('plant', id, count);
+    const weights = species.map(item => 1 / item.totalDemand);
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+
+    // Calcula as cotas proporcionais iniciais.
+    const counts = species.map((item, index) => ({
+      id: item.id,
+      count: Math.min(
+        maxPerSpecies,
+        Math.floor(capacity * weights[index] / totalWeight)
+      ),
+      remainder: (capacity * weights[index] / totalWeight) % 1
+    }));
+
+    // Distribui as unidades restantes pelas maiores partes decimais.
+    let remaining = Math.max(
+      0,
+      capacity - counts.reduce((sum, item) => sum + item.count, 0)
+    );
+
+    counts.sort((a, b) => b.remainder - a.remainder);
+
+    while (remaining > 0) {
+      let distributed = false;
+
+      for (const item of counts) {
+        if (remaining <= 0) break;
+
+        if (item.count < maxPerSpecies) {
+          item.count++;
+          remaining--;
+          distributed = true;
+        }
+      }
+
+      // Evita repetição infinita caso todas as espécies atinjam o limite.
+      if (!distributed) break;
+    }
+
+    counts.forEach(item => {
+      setSpeciesCountSlider('animal', item.id, item.count);
     });
   }
 
-  // 2. Consumidores Animais (Classificação por Nível Trófico e Gasto Metabólico de Kleiber)
+  // 1. Produtores primários.
+  const targetPlantTotal = Math.min(
+    110,
+    Math.max(35, Math.round(totalCells * 0.22))
+  );
+
+  const plantEntries = Object.entries(worldSpeciesSelection.plants);
+
+  if (plantEntries.length > 0) {
+    const totalGrowthWeight = plantEntries.reduce(
+      (sum, [_, item]) => sum + (item.species.genes.growthSpeed || 0.5),
+      0
+    ) || 1;
+
+    // Distribui a quantidade de plantas respeitando o limite de 120 por espécie.
+    const plantWeights = plantEntries.map(([id, item]) => ({
+      id,
+      weight: (item.species.genes.growthSpeed || 0.5) / totalGrowthWeight
+    }));
+
+    plantWeights.forEach(item => {
+      const count = Math.min(
+        120,
+        Math.round(targetPlantTotal * item.weight)
+      );
+
+      setSpeciesCountSlider('plant', item.id, count);
+    });
+  }
+
+  // 2. Classificação dos animais por nível trófico.
   const animalEntries = Object.entries(worldSpeciesSelection.animals);
+
   if (animalEntries.length === 0) {
     updateWorldSpeciesTotals();
-    toast('⚖️ Nenhuma espécie animal disponível para balanceamento.');
+    toast('Nenhuma espécie animal disponível para balanceamento.');
     return;
   }
 
@@ -1021,9 +1089,13 @@ function autoBalanceTrophicPopulations() {
 
   animalEntries.forEach(([id, item]) => {
     const g = item.species.genes;
-    const diet = g.diet || { meat: 0.3, plant: 0.6, carcass: 0.1 };
+    const diet = g.diet || {
+      meat: 0.3,
+      plant: 0.6,
+      carcass: 0.1
+    };
 
-    // Taxa metabólica basal e locomoção pelo porte de Kleiber
+    // Estimativa de demanda metabólica.
     const massKg = 5.0 + (g.size || 0.5) * 70.0;
     const basal = 0.06 * Math.pow(massKg / 40.0, 0.75);
     const motion = 0.04 * Math.pow((g.speed || 0.5) * 1.5, 1.5);
@@ -1040,48 +1112,120 @@ function autoBalanceTrophicPopulations() {
     }
   });
 
-  // Capacidade de suporte para herbívoros (aproximadamente 35% do número de plantas)
-  const baseHerbivoreCapacity = Math.max(12, Math.round(targetPlantTotal * 0.36));
+  // 3. Herbívoros.
+  const baseHerbivoreCapacity = Math.max(
+    12,
+    Math.round(targetPlantTotal * 0.36)
+  );
 
-  if (herbivores.length > 0) {
-    const invDemandSum = herbivores.reduce((sum, h) => sum + (1.0 / h.totalDemand), 0);
-    herbivores.forEach(h => {
-      // Herbívoros menores e mais eficientes ganham cotas maiores; grandes herbívoros ganham cotas menores
-      const share = (1.0 / h.totalDemand) / invDemandSum;
-      const finalCount = Math.max(4, Math.min(45, Math.round(baseHerbivoreCapacity * share)));
-      setSpeciesCountSlider('animal', h.id, finalCount);
-    });
-  }
+  distributePopulation(
+    herbivores,
+    baseHerbivoreCapacity,
+    80
+  );
 
-  if (omnivores.length > 0) {
-    const omniCapacity = Math.max(5, Math.round(baseHerbivoreCapacity * 0.40));
-    const invDemandSum = omnivores.reduce((sum, o) => sum + (1.0 / o.totalDemand), 0);
-    omnivores.forEach(o => {
-      const share = (1.0 / o.totalDemand) / invDemandSum;
-      const finalCount = Math.max(3, Math.min(25, Math.round(omniCapacity * share)));
-      setSpeciesCountSlider('animal', o.id, finalCount);
-    });
-  }
+  // 4. Onívoros.
+  const omniCapacity = Math.max(
+    5,
+    Math.round(baseHerbivoreCapacity * 0.40)
+  );
 
-  // Predadores de Topo (Regra de Lindeman: ~16% a 20% da biomassa de presas ativas)
+  distributePopulation(
+    omnivores,
+    omniCapacity,
+    80
+  );
+
+  // 5. Predadores.
   let totalPreyEstimate = 0;
-  herbivores.forEach(h => totalPreyEstimate += (worldSpeciesSelection.animals[h.id]?.count || 10));
-  omnivores.forEach(o => totalPreyEstimate += (worldSpeciesSelection.animals[o.id]?.count || 5) * 0.5);
 
-  const targetPredatorCapacity = Math.max(2, Math.round(totalPreyEstimate * 0.18));
-  if (carnivores.length > 0) {
-    const invDemandSum = carnivores.reduce((sum, c) => sum + (1.0 / c.totalDemand), 0);
-    carnivores.forEach(c => {
-      const share = (1.0 / c.totalDemand) / invDemandSum;
-      // Garante pelo menos 2 indivíduos (macho/fêmea ou par reprodutor mínimo)
-      const finalCount = Math.max(2, Math.min(14, Math.round(targetPredatorCapacity * share)));
-      setSpeciesCountSlider('animal', c.id, finalCount);
-    });
-  }
+  herbivores.forEach(h => {
+    totalPreyEstimate += worldSpeciesSelection.animals[h.id]?.count || 0;
+  });
+
+  omnivores.forEach(o => {
+    totalPreyEstimate +=
+      (worldSpeciesSelection.animals[o.id]?.count || 0) * 0.5;
+  });
+
+  const targetPredatorCapacity = Math.max(
+    2,
+    Math.round(totalPreyEstimate * 0.18)
+  );
+
+  distributePopulation(
+    carnivores,
+    targetPredatorCapacity,
+    80
+  );
 
   updateWorldSpeciesTotals();
-  toast('⚖️ Populações calibradas pela Pirâmide de Elton & Kleiber!');
+  toast('Populações recalibradas pelo balanceamento trófico!');
 }
+
+// Aplica ao mundo as quantidades definidas no perfil de teste.
+async function applyTestSpeciesProfile() {
+  try {
+    // Lê o perfil selecionado na tela.
+    const selectedProfile = document.getElementById('test-profile-select').value;
+
+    // Carrega o arquivo JSON com os perfis de teste.
+    const response = await fetch('data/test-species.json');
+
+    if (!response.ok) {
+      throw new Error('Não foi possível carregar test-species.json.');
+    }
+
+    const config = await response.json();
+
+    // Procura o perfil escolhido.
+    const profile = config.tests.find(test => test.id === selectedProfile);
+
+    if (!profile) {
+      throw new Error('Perfil de teste não encontrado.');
+    }
+
+    // Garante que todas as espécies estejam registradas na seleção.
+    refreshWorldSpeciesCounts();
+
+    // Zera as quantidades atuais sem apagar os dados das espécies.
+    Object.values(worldSpeciesSelection.animals).forEach(item => {
+      item.count = 0;
+    });
+
+    Object.values(worldSpeciesSelection.plants).forEach(item => {
+      item.count = 0;
+    });
+
+    // Aplica as quantidades de animais definidas no JSON.
+    Object.entries(profile.animals).forEach(([id, count]) => {
+      if (worldSpeciesSelection.animals[id]) {
+        worldSpeciesSelection.animals[id].count = count;
+      } else {
+        console.warn(`Espécie animal não encontrada: ${id}`);
+      }
+    });
+
+    // Aplica as quantidades de plantas definidas no JSON.
+    Object.entries(profile.plants).forEach(([id, count]) => {
+      if (worldSpeciesSelection.plants[id]) {
+        worldSpeciesSelection.plants[id].count = count;
+      } else {
+        console.warn(`Espécie vegetal não encontrada: ${id}`);
+      }
+    });
+
+    // Atualiza os cartões e os totais exibidos na tela.
+    refreshWorldSpeciesCounts();
+
+    toast(`Perfil ${selectedProfile} aplicado com sucesso!`);
+
+  } catch (error) {
+    console.error('Erro ao aplicar perfil de teste:', error);
+    toast('Erro ao carregar o perfil de teste.');
+  }
+}
+
 
 function saveAndStartWorld() {
   const size = parseInt(document.getElementById('world-size')?.value || 50);
@@ -1133,6 +1277,19 @@ function saveAndStartWorld() {
   localStorage.setItem('evo_world_config', JSON.stringify(worldConfig));
   if (typeof engine !== 'undefined') {
     engine.init(document.getElementById('sim-canvas'), worldConfig);
+
+    // Aplica parâmetros de evolução e equilíbrio configurados pelo usuário
+    const mutRate = parseFloat(document.getElementById('world-mutation-rate')?.value || 1.0);
+    const satiety = parseInt(document.getElementById('world-predator-satiety')?.value || 65) / 100;
+    const seedBank = parseInt(document.getElementById('world-seed-bank')?.value || 14) / 100;
+    const homeostasis = document.getElementById('world-auto-homeostasis')?.checked ?? true;
+
+    if (engine.equilibriumSettings) {
+      engine.equilibriumSettings.mutationRateMultiplier = mutRate;
+      engine.equilibriumSettings.predatorSatietyThreshold = satiety;
+      engine.equilibriumSettings.seedBankRate = seedBank;
+      engine.equilibriumSettings.autoHomeostasis = homeostasis;
+    }
   }
   showPage('simulation');
 }
@@ -1296,6 +1453,16 @@ function startOrResumeSimulation() {
   setTimeout(() => {
     if (typeof simCamera !== 'undefined') simCamera.fitToScreen();
   }, 50);
+
+  // Injeta updateSideConsole no updateStatsUI do engine
+  if (engine.updateStatsUI && !engine._sideConsoleHooked) {
+    const _orig = engine.updateStatsUI.bind(engine);
+    engine.updateStatsUI = function() {
+      _orig();
+      updateSideConsole();
+    };
+    engine._sideConsoleHooked = true;
+  }
 }
 function togglePlayPause() {
   if (typeof engine === 'undefined') return;
@@ -1307,13 +1474,19 @@ function updatePlayPauseButtonUI(isPlaying) {
   const btn = document.getElementById('btn-sim-play');
   if (btn) {
     btn.innerHTML = isPlaying ? '⏸️ Pausar' : '▶️ Continuar';
+    btn.className = isPlaying ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm';
+  }
+  const consoleBtn = document.getElementById('btn-console-play');
+  if (consoleBtn) {
+    consoleBtn.innerHTML = isPlaying ? '⏸️ Pausar' : '▶️ Continuar';
+    consoleBtn.className = isPlaying ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm';
   }
 }
 
 function setSimSpeed(mult) {
   if (typeof engine === 'undefined') return;
   engine.setSpeed(mult);
-  document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.speed) === mult));
+  document.querySelectorAll('.speed-btn, .console-speed-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.speed) === mult));
 }
 
 function simFastForward() { if (typeof engine !== 'undefined') engine.fastForward(50); }
@@ -1351,9 +1524,103 @@ function viewAnalyticsFromExtinction() {
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof miniPaint !== 'undefined') miniPaint.init();
+  if (typeof systemConsole !== 'undefined') systemConsole.init();
   initAnimalCreator();
   initPlantCreator();
   initWorldCreator();
   initSimulationScreen();
   showPage('menu');
 });
+
+// ── TROCA DE PAINEL LATERAL NA SIMULAÇÃO ────────────
+function switchSidePanel(name) {
+  document.querySelectorAll('.sidepanel').forEach(p => {
+    p.style.display = 'none';
+    p.classList.remove('active');
+  });
+  document.querySelectorAll('.sidebar-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.sidepanel === name);
+  });
+  const target = document.getElementById('sidepanel-' + name);
+  if (target) { target.style.display = 'flex'; target.classList.add('active'); }
+}
+
+// ── CONSOLE LATERAL: atualização a cada 100 ticks ───
+let _sideConsoleLastTick = -1;
+let _sideConsoleKillsLast = 0;
+
+function updateSideConsole() {
+  if (typeof engine === 'undefined' || !engine.latestDiagnostics) return;
+  const d = engine.latestDiagnostics;
+  const tick = engine.tickCount || 0;
+
+  // Só atualiza a cada 100 ticks
+  if (tick - _sideConsoleLastTick < 100) return;
+  _sideConsoleLastTick = tick;
+
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+  // latestDiagnostics tem estrutura aninhada: d.vegetation, d.density, d.energy, d.ai
+  const plants  = d.vegetation?.living   ?? (engine.plants?.length  ?? 0);
+  const animals = d.density?.population  ?? (engine.animals?.length ?? 0);
+  const herb    = d.density?.herbivoreCount ?? 0;
+  const carn    = d.density?.carnivoreCount ?? 0;
+  const avgE    = d.energy?.avgGeneral   ?? null;
+  const kills   = (d.ai?.nonCarnivorePreyKills ?? 0) + (d.ai?.carnivorePreyKills ?? 0);
+
+  set('side-console-tick-badge', 'Ciclo: ' + tick);
+  set('sc-plants',     plants);
+  set('sc-animals',    animals);
+  set('sc-herbivores', herb);
+  set('sc-carnivores', carn);
+  set('sc-avg-energy', avgE != null ? parseFloat(avgE).toFixed(1) : '—');
+  set('sc-kills',      kills - _sideConsoleKillsLast);
+  _sideConsoleKillsLast = kills;
+
+  // Adiciona linha ao log compacto
+  const log = document.getElementById('side-console-log');
+  if (log) {
+    const isCritical = animals < 5 || plants < 5;
+    const isWarn     = carn === 0 || herb === 0;
+    const line = document.createElement('div');
+    line.className = 'sc-line' + (isCritical ? ' sc-err' : isWarn ? ' sc-warn' : '');
+    line.textContent = '[' + tick + '] 🌿' + plants + ' 🦊' + herb + ' 🐺' + carn
+                     + ' ⚡' + (avgE != null ? parseFloat(avgE).toFixed(0) : '?');
+    log.appendChild(line);
+    while (log.children.length > 50) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+// ── PRESETS DE EVOLUÇÃO NA CRIAÇÃO DE MUNDO ─────────
+function applyWorldEvoPreset(preset) {
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = val;
+    el.dispatchEvent(new Event('input'));
+  };
+
+  if (preset === 'sustainable') {
+    setVal('world-mutation-rate', '1.0');
+    setVal('world-predator-satiety', '65');
+    setVal('world-seed-bank', '14');
+    const cb = document.getElementById('world-auto-homeostasis');
+    if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+    toast('🟢 Preset "Equilíbrio Estável" aplicado!');
+  } else if (preset === 'fast-evolution') {
+    setVal('world-mutation-rate', '2.2');
+    setVal('world-predator-satiety', '70');
+    setVal('world-seed-bank', '22');
+    const cb = document.getElementById('world-auto-homeostasis');
+    if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+    toast('⚡ Preset "Evolução Acelerada" aplicado!');
+  } else if (preset === 'hardcore') {
+    setVal('world-mutation-rate', '1.5');
+    setVal('world-predator-satiety', '85');
+    setVal('world-seed-bank', '4');
+    const cb = document.getElementById('world-auto-homeostasis');
+    if (cb) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+    toast('🦁 Preset "Mundo Selvagem" aplicado! Sem rede de segurança.');
+  }
+}
