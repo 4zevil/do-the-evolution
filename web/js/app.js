@@ -1529,6 +1529,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initPlantCreator();
   initWorldCreator();
   initSimulationScreen();
+  updateSimplifiedButtonUI();
   showPage('menu');
 });
 
@@ -1622,5 +1623,26 @@ function applyWorldEvoPreset(preset) {
     const cb = document.getElementById('world-auto-homeostasis');
     if (cb) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
     toast('🦁 Preset "Mundo Selvagem" aplicado! Sem rede de segurança.');
+  }
+}
+// ── MODO RÁPIDO / SPRITES SIMPLIFICADOS (ALTA PERFORMANCE) ──
+function toggleSimplifiedSprites() {
+  if (typeof engine === 'undefined') return;
+  engine.simplifiedSprites = !engine.simplifiedSprites;
+  localStorage.setItem('evo_simplified_sprites', engine.simplifiedSprites ? 'true' : 'false');
+  updateSimplifiedButtonUI();
+  engine.render();
+  toast(engine.simplifiedSprites ? '⚡ Modo Rápido (Sprites Simplificados) ativado!' : '🎨 Modo Detalhado ativado!');
+}
+
+function updateSimplifiedButtonUI() {
+  const btn = document.getElementById('btn-toggle-simplified');
+  if (!btn || typeof engine === 'undefined') return;
+  if (engine.simplifiedSprites) {
+    btn.innerHTML = '⚡ Modo Rápido: Ativo';
+    btn.classList.add('active');
+  } else {
+    btn.innerHTML = '⚡ Modo Rápido: Desligado';
+    btn.classList.remove('active');
   }
 }

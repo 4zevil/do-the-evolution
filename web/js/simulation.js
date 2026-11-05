@@ -168,6 +168,7 @@ this.animalMetrics = {
 
     this.historyInterval = 10;
     this.latestDiagnostics = null;
+    this.spawnGroupCenters = [];
     this.initEquilibriumSettings();
   }
 
@@ -260,6 +261,7 @@ for (const [biome, stats] of Object.entries(biomeStats)) {
     
     this.spawnInitialAnimals(this.worldConfig.initialAnimalCount || 25);
 
+    this.createTerrainCache();
     this.render();
   }
 
@@ -277,6 +279,39 @@ for (const [biome, stats] of Object.entries(biomeStats)) {
     }
     this.render();
     this.updateCensusUI();
+  }
+
+
+  createTerrainCache() {
+    if (!this.canvas) return;
+    if (!this.terrainCanvas) {
+      this.terrainCanvas = document.createElement('canvas');
+    }
+    this.terrainCanvas.width = this.canvas.width;
+    this.terrainCanvas.height = this.canvas.height;
+    const tCtx = this.terrainCanvas.getContext('2d');
+
+    const BIOME_TILES = {
+      water:   '#183a66',
+      fertile: '#1a4e1d',
+      dry:     '#5e5025',
+      rocky:   '#3c4146'
+    };
+
+    for (let r = 0; r < this.gridRows; r++) {
+      for (let c = 0; c < this.gridCols; c++) {
+        const cell = this.grid[r][c];
+        const x = c * this.cellSize, y = r * this.cellSize;
+        tCtx.fillStyle = BIOME_TILES[cell.biome] || '#1a4e1d';
+        tCtx.fillRect(x, y, this.cellSize, this.cellSize);
+
+        if (this.showGridLines) {
+          tCtx.strokeStyle = 'rgba(0,0,0,0.14)';
+          tCtx.lineWidth = 1;
+          tCtx.strokeRect(x, y, this.cellSize, this.cellSize);
+        }
+      }
+    }
   }
 
   toggleGridLines() {
@@ -770,6 +805,18 @@ spawnSingleAnimal(name, genes, customImages, centerX = null, centerY = null) {
 
   updateTick() {
   this.tickCount++;
+
+  // OTIMIZAÇÃO ULTRA-FPS: Cache trófico O(N) único para eliminar varreduras quadráticas O(N^2)
+  const carnivoresList = [];
+  const herbivoresList = [];
+  const aTotal = this.animals.length;
+  for (let i = 0; i < aTotal; i++) {
+    const a = this.animals[i];
+    if ((a.genes?.diet?.meat || 0) > 0.45) carnivoresList.push(a);
+    else herbivoresList.push(a);
+  }
+  this._carnivores = carnivoresList;
+  this._herbivores = herbivoresList;
   // Contadores temporários de comportamento alimentar.
 this.aiMetrics ??= {
   fleeEvents: 0,
@@ -1478,27 +1525,7 @@ if (plant.energy <= 0 || plant.age > 500) {
         }
       }
 
-      // Estresse de densidade (Cortisol)
-      let nearbyNeighbors = 0;
-      for (let oIdx = 0; oIdx < this.animals.length; oIdx++) {
-        const other = this.animals[oIdx];
-        if (other !== anim && Math.hypot(other.x - anim.x, other.y - anim.y) < 48) {
-          nearbyNeighbors++;
-        }
-      }
-
-      if (false && nearbyNeighbors > 2) {
-  const crowdStressFactor = 1.0 + (nearbyNeighbors - 2) * 0.14;
-  totalCost *= crowdStressFactor;
-}
-
-      // Epidemias
-      if (false && !anim.isDiseased && nearbyNeighbors > 4 && Math.random() < 0.004 * nearbyNeighbors) {
-         this.aiMetrics.crowdInfections++;
-        anim.isDiseased = true;
-        anim.diseaseTimer = 190;
-        anim.stateLabel = '☣️ Epidemia por Superlotação!';
-      }
+      // (Otimizado: Loop inútil de cortisol O(N^2) removido para ultra performance)
 
       if (anim.isDiseased) {
         anim.diseaseTimer--;
@@ -1533,7 +1560,7 @@ if (plant.energy <= 0 || plant.age > 500) {
               y: Math.max(10, Math.min((this.gridRows * this.cellSize) - 10, anim.y + (Math.random() * 14 - 7))),
               vx: (Math.random() - 0.5) * babySpeed,
               vy: (Math.random() - 0.5) * babySpeed,
-              energy: 16.0,
+              energy: (babyGenes.diet?.meat || 0) > 0.45 ? 58.0 : 24.0,
               maxEnergy: 100.0 + (babyGenes.diet?.meat || 0) * 80.0,
               age: 0,
               genes: {
@@ -1564,7 +1591,8 @@ if (plant.energy <= 0 || plant.age > 500) {
 
      // Identifica o motivo da morte do animal.
 // Verifica se o animal realmente morreu.
-if (anim.energy <= 0 || anim.age > 750) {
+const maxLifespan = (g.diet?.meat || 0) > 0.45 ? (950 + (g.size || 0.5) * 300) : (700 + (g.size || 0.5) * 150);
+if (anim.energy <= 0 || anim.age > maxLifespan) {
 
 // Identifica o motivo da morte.
 if (anim.energy <= 0) {
@@ -1806,6 +1834,7 @@ anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
       }
 
       // B. Predação (com saciedade para evitar super-predação em cascata)
+      // B. Predação (com saciedade para evitar super-predação em cascata)
       const satietyThreshold = anim.maxEnergy * (this.equilibriumSettings?.predatorSatietyThreshold ?? 0.65);
       const isCarnivoreAgent = (g.diet?.meat || 0) > 0.45;
       const isHungryCarnivore = isCarnivoreAgent && !targetX && anim.energy < satietyThreshold;
@@ -1820,20 +1849,31 @@ anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
           if (other === anim) return;
           if (other.energy <= 0) return;
           if (other.genes.size > g.size * sizeAdvantage) return;
+
+          // ✅ 1. Calcula a distância 'd' PRIMEIRO:
+          const d = Math.hypot(other.x - anim.x, other.y - anim.y);
+          if (d >= viewDist) return;
+
+          // ✅ 2. Usa o cache trófico _herbivores (evita travar a CPU):
+          const totalPreyCount = this._herbivores ? this._herbivores.length : 30;
+          if (totalPreyCount < 30 && d > 45) return;
+
           const isSameSpecies = (other.speciesName === anim.speciesName);
           if (isSameSpecies && anim.energy >= 30.0) return;
           if ((other.genes.diet?.meat || 0) > 0.45 && other.genes.size > g.size * 1.05) return;
 
-          const d = Math.hypot(other.x - anim.x, other.y - anim.y);
-          if (d >= viewDist) return;
-
           // Prefere presas mais próximas e mais fatigadas/fracas
           const preyEnergyRatio = (other.energy || 0) / (other.maxEnergy || 100);
           const score = d + preyEnergyRatio * 40;
-          if (score < bestPreyScore) { bestPreyScore = score; minPDist = d; bestPrey = other; }
+          if (score < bestPreyScore) { 
+            bestPreyScore = score; 
+            minPDist = d; 
+            bestPrey = other; 
+          }
         });
 
         if (bestPrey) {
+          // Continua o restante do código normalmente...
           targetX = bestPrey.x;
           targetY = bestPrey.y;
 
@@ -1968,48 +2008,71 @@ anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
       }
     }
 
-    // 3. REPRODUÇÃO SEXUADA COM INÍCIO DE GESTAÇÃO
-    // 3. REPRODUÇÃO SEXUADA COM INÍCIO DE GESTAÇÃO
+        // 3. REPRODUÇÃO SEXUADA COM INÍCIO DE GESTAÇÃO (Desacoplamento por Nível Trófico)
+    let totalCarnivores = 0;
+    let totalHerbivores = 0;
+    for (let i = 0; i < this.animals.length; i++) {
+      if ((this.animals[i].genes?.diet?.meat || 0) > 0.45) totalCarnivores++;
+      else totalHerbivores++;
+    }
 
-// Calcula a pressão populacional antes de iniciar uma nova gestação.
-const population = this.animals.length + newOffspring.length;
+    const preyPerPredator = totalCarnivores > 0 ? (totalHerbivores / totalCarnivores) : 20.0;
 
-// Reduz gradualmente a reprodução entre 70% e 85% do limite populacional.
-// Abaixo de 100 animais: boost de emergência (1.5x) para ajudar a recuperação.
-const reproductionFactor = population < 100
-  ? 1.5
-  : population < 420
-    ? 1.0
-    : population >= 510
-      ? 0.0
-      : 1.0 - ((population - 420) / 90);
+    let reproductionFactor;
+    if (isCarnivore) {
+      // CARNÍVOROS (Regulação Lotka-Volterra por razão presa/predador):
+      // Um ecossistema saudável mantém ~8 a 20 presas por predador.
+      if (totalCarnivores < 4) {
+        // População crítica: esforço de sobrevivência se houver presas mínimas
+        reproductionFactor = totalHerbivores >= 8 ? 1.8 : 0.2;
+      } else if (preyPerPredator < 5.0 || totalCarnivores >= 40) {
+        // Superpredação ou saturação de carnívoros: trava natalidade de predadores
+        reproductionFactor = 0.02;
+      } else if (preyPerPredator < 8.0) {
+        reproductionFactor = 0.25;
+      } else if (totalCarnivores < 18) {
+        reproductionFactor = 1.25;
+      } else {
+        reproductionFactor = 0.65;
+      }
+    } else {
+      // HERBÍVOROS: Alta recuperação quando caem abaixo de 80
+      reproductionFactor = totalHerbivores < 80
+        ? 1.85
+        : totalHerbivores < 260
+          ? 1.15
+          : totalHerbivores >= 400
+            ? 0.0
+            : 1.0 - ((totalHerbivores - 260) / 140);
+    }
 
-// Decide se este animal poderá iniciar uma tentativa de reprodução.
-const canStartReproduction = Math.random() < reproductionFactor;
+    const canStartReproduction = Math.random() < reproductionFactor;
+    const reproEnergyThreshold = isCarnivore 
+      ? (totalCarnivores < 20 ? 75.0 : 90.0)
+      : 68.0;
 
-// Threshold de energia para reprodução com valores absolutos:
-// Carnívoros: 95 (atingível para maxEnergy~168), Herbívoros: 68 (68% de maxEnergy~100).
-// Usar percentual de maxEnergy para carnívoros era inatingível (80% de 168 = 134).
-const reproEnergyThreshold = isCarnivore ? 95.0 : 68.0;
-
-if (
-  canStartReproduction &&
-  anim.energy > reproEnergyThreshold &&
-  anim.age > 50 &&
-  anim.mateCooldown === 0 &&
-  !anim.isDiseased &&
-  !anim.isPregnant &&
-  !targetX
-) {
-      let bestMate = null, minMDist = viewDist * 1.2;
+    if (
+      canStartReproduction &&
+      anim.energy > reproEnergyThreshold &&
+      anim.age > 45 &&
+      anim.mateCooldown === 0 &&
+      !anim.isDiseased &&
+      !anim.isPregnant
+    ) {
+      // Carnívoros usam faro e uivos de longo alcance para rastrear parceiros no território
+      const mateSearchRadius = isCarnivore 
+        ? Math.max(viewDist * 4.0, 750) 
+        : (viewDist * 1.2);
+      let bestMate = null, minMDist = mateSearchRadius;
 
       this.animals.forEach(other => {
-        // Parceiro precisa ter energia suficiente para reproduzir
         const otherIsCarnivore = (other.genes.diet?.meat || 0) > 0.45;
-        const otherReproThreshold = otherIsCarnivore ? 95.0 : 68.0;
-        if (other === anim || other.energy <= otherReproThreshold * 0.90 || other.mateCooldown > 0 || other.isDiseased || other.isPregnant) return;
+        const otherReproThreshold = otherIsCarnivore 
+          ? (totalCarnivores < 20 ? 70.0 : 85.0) 
+          : 65.0;
+        if (other === anim || other.energy <= otherReproThreshold * 0.85 || other.mateCooldown > 0 || other.isDiseased || other.isPregnant) return;
 
-        const genDist = getGeneticDistance(anim.genes, other.genes);
+const genDist = getGeneticDistance(anim.genes, other.genes);
         let isCompatible = false;
 
         if (other.speciesName === anim.speciesName) {
@@ -2031,7 +2094,7 @@ if (
       if (bestMate) {
         targetX = bestMate.x;
         targetY = bestMate.y;
-        desiredSpeed = maxSpeed * 0.6;
+        desiredSpeed = maxSpeed * 0.85;
         anim.stateLabel = 'Buscando Parceiro';
 
         if (minMDist < 16) {
@@ -2108,16 +2171,30 @@ if (
             }
           }
 
-          let clutchSize = Math.random() < ((g.offspringCount + bestMate.genes.offspringCount) / 2) ? 2 : 1;
+          const gestA = g.gestation ?? 0.45;
+          const gestB = bestMate.genes?.gestation ?? 0.45;
+          const offA = g.offspringCount ?? 0.45;
+          const offB = bestMate.genes?.offspringCount ?? 0.45;
+
+          let clutchSize;
+          if (isCarnivore) {
+            clutchSize = totalCarnivores < 20 ? 3 : (totalCarnivores < 40 ? 2 : (Math.random() < ((offA + offB) / 2) ? 2 : 1));
+          } else {
+            clutchSize = Math.random() < ((offA + offB) / 2) ? 2 : 1;
+          }
           if (speciationCheck.diverged && clutchSize < 2) clutchSize = 2;
 
-          // Inicia a gestação na mãe em vez de parir instantaneamente
           anim.isPregnant = true;
-          anim.gestationTicks = Math.round(35 + ((g.gestation + bestMate.genes.gestation) / 2) * 45);
+          const gestFactor = (isCarnivore && totalCarnivores < 20) ? 0.70 : 1.0;
+          anim.gestationTicks = Math.max(15, Math.round((28 + ((gestA + gestB) / 2) * 35) * gestFactor));
           anim.pregnantGenes = childGenes;
           anim.pregnantSpeciesName = finalSpeciesName;
           anim.pregnantClutchSize = clutchSize;
           anim.stateLabel = 'Iniciou Gestação';
+
+          const mateCooldownVal = (isCarnivore && totalCarnivores < 20) ? 45 : 85;
+          anim.mateCooldown = mateCooldownVal;
+          bestMate.mateCooldown = mateCooldownVal;
           return;
         }
       }
@@ -2276,36 +2353,14 @@ reinjectPioneers(count = 18) {
     const W = this.canvas.width, H = this.canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    const BIOME_TILES = {
-      water:   '#183a66',
-      fertile: '#1a4e1d',
-      dry:     '#5e5025',
-      rocky:   '#3c4146'
-    };
-
-    for (let r = 0; r < this.gridRows; r++) {
-      for (let c = 0; c < this.gridCols; c++) {
-        const cell = this.grid[r][c];
-        const x = c * this.cellSize, y = r * this.cellSize;
-
-        ctx.fillStyle = BIOME_TILES[cell.biome] || '#1a4e1d';
-        ctx.fillRect(x, y, this.cellSize, this.cellSize);
-
-        if (cell.organicBiomass > 2.0) {
-          ctx.fillStyle = `rgba(160, 95, 25, ${Math.min(0.35, cell.organicBiomass / 80)})`;
-          ctx.fillRect(x, y, this.cellSize, this.cellSize);
-        }
-
-        // Desenha a linha da grade somente se a opção estiver ativada
-        if (this.showGridLines) {
-          ctx.strokeStyle = 'rgba(0,0,0,0.14)';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(x, y, this.cellSize, this.cellSize);
-        }
-      }
+    // OTIMIZAÇÃO: Desenha o terreno do cache pré-renderizado (1 única operação de GPU)
+    if (this.terrainCanvas && this.terrainCanvas.width === W && this.terrainCanvas.height === H) {
+      ctx.drawImage(this.terrainCanvas, 0, 0);
+    } else {
+      this.createTerrainCache();
+      if (this.terrainCanvas) ctx.drawImage(this.terrainCanvas, 0, 0);
     }
 
-        
     // Carcaças
     this.carcasses.forEach(c => {
       if (!c || c.remainingEnergy <= 0) return;
@@ -2316,124 +2371,173 @@ reinjectPioneers(count = 18) {
       ctx.translate(c.x, c.y);
       ctx.fillStyle = '#8b263e';
       ctx.beginPath();
-      ctx.ellipse(0, 0, 7, 5, 0.4, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 6, 4, 0.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#e6edf3';
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(-4, 0); ctx.lineTo(4, 0);
+      ctx.moveTo(-3, 0); ctx.lineTo(3, 0);
       ctx.stroke();
       ctx.restore();
     });
 
-    // Vegetais
-    this.plants.forEach(plant => {
-      try {
-        const isTargetSpecies = !this.highlightedSpecies || (plant.name === this.highlightedSpecies);
-        ctx.save();
-        if (this.highlightedSpecies && !isTargetSpecies) {
-          ctx.globalAlpha = 0.20;
-        }
-        const pScale = 0.35 + (plant.growth || 0.5) * 0.35;
-        drawPlant(ctx, plant.genes, plant.x, plant.y + 4, pScale, plant.customImages || {});
-        ctx.restore();
-
-        if (this.highlightedSpecies && isTargetSpecies) {
-          ctx.save();
-          const pulse = (Math.sin(Date.now() * 0.007) + 1) * 0.5;
-          const spData = this.speciesCatalog.find(s => s.name === plant.name);
-          const glowColor = spData ? spData.color : '#3fb950';
-
-          ctx.strokeStyle = glowColor;
-          ctx.lineWidth = 2.5;
-          ctx.shadowColor = glowColor;
-          ctx.shadowBlur = 12;
+    // ── VEGETAIS (Modo Simplificado vs Modo Detalhado) ──
+    if (this.simplifiedSprites) {
+      this.plants.forEach(plant => {
+        try {
+          const isTargetSpecies = !this.highlightedSpecies || (plant.name === this.highlightedSpecies);
+          const pScale = 0.35 + (plant.growth || 0.5) * 0.35;
+          const r = Math.max(2.5, (3 + (plant.genes?.height || 0.5) * 5) * pScale);
+          const hue = plant.genes?.colorHue ?? 110;
+          ctx.fillStyle = `hsl(${hue}, 70%, 42%)`;
           ctx.beginPath();
-          ctx.arc(plant.x, plant.y, 16 + pulse * 4, 0, Math.PI * 2);
-          ctx.stroke();
+          ctx.arc(plant.x, plant.y, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          if (plant.hasFruit) {
+            ctx.fillStyle = '#ff4d4f';
+            ctx.beginPath();
+            ctx.arc(plant.x, plant.y - r * 0.5, 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          if (this.highlightedSpecies && isTargetSpecies) {
+            ctx.strokeStyle = '#56d364';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        } catch (err) {}
+      });
+    } else {
+      this.plants.forEach(plant => {
+        try {
+          const isTargetSpecies = !this.highlightedSpecies || (plant.name === this.highlightedSpecies);
+          ctx.save();
+          if (this.highlightedSpecies && !isTargetSpecies) {
+            ctx.globalAlpha = 0.20;
+          }
+          const pScale = 0.35 + (plant.growth || 0.5) * 0.35;
+          drawPlant(ctx, plant.genes, plant.x, plant.y + 4, pScale, plant.customImages || {});
+          ctx.restore();
+
+          if (this.highlightedSpecies && isTargetSpecies) {
+            ctx.save();
+            const pulse = (Math.sin(Date.now() * 0.007) + 1) * 0.5;
+            const spData = this.speciesCatalog.find(s => s.name === plant.name);
+            const glowColor = spData ? spData.color : '#3fb950';
+
+            ctx.strokeStyle = glowColor;
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.arc(plant.x, plant.y, 16 + pulse * 4, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        } catch (err) {
           ctx.restore();
         }
-      } catch (err) {
-        // Garante que erro em uma planta não interrompa o resto da renderização
-        ctx.restore();
-      }
-    });
+      });
+    }
 
-    // Animais
-    this.animals.forEach(anim => {
-      try {
-        const animSpecies = anim.speciesName || anim.name;
-        const isTargetSpecies = !this.highlightedSpecies || (animSpecies === this.highlightedSpecies);
+    // ── ANIMAIS (Modo Simplificado vs Modo Detalhado) ──
+    if (this.simplifiedSprites) {
+      this.animals.forEach(anim => {
+        try {
+          const isCarn = (anim.genes?.diet?.meat || 0) > 0.45;
+          const animSize = anim.genes?.size ?? 0.5;
+          const r = Math.max(3.5, 4 + animSize * 7);
 
-        ctx.save();
-        if (this.highlightedSpecies && !isTargetSpecies) {
-          ctx.globalAlpha = 0.20;
-        }
+          // Cor pelo papel trófico
+          if (isCarn) {
+            ctx.fillStyle = '#f85149';
+          } else {
+            const hue = anim.genes?.colorHue ?? 120;
+            ctx.fillStyle = `hsl(${hue}, 70%, 48%)`;
+          }
 
-        const animSize = anim.genes?.size ?? 0.5;
-        const aScale = 0.35 + animSize * 0.35;
-        drawCreature(ctx, anim.genes || {}, anim.x, anim.y, aScale, anim.customImages || {});
-
-        // Indicador de Doença / Príon
-        if (anim.isDiseased) {
-          ctx.strokeStyle = '#d2a8ff';
-          ctx.lineWidth = 1.8;
-          ctx.setLineDash([3, 3]);
           ctx.beginPath();
-          ctx.arc(anim.x, anim.y, 14 + animSize * 10, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+          ctx.arc(anim.x, anim.y, r, 0, Math.PI * 2);
+          ctx.fill();
 
-        // Indicador Visual de Gestação
-        if (anim.isPregnant) {
-          ctx.strokeStyle = '#ffa657';
+          // Vetor de direção da criatura
+          const heading = Math.atan2(anim.vy || 0, anim.vx || 0);
+          ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.arc(anim.x, anim.y, 12 + animSize * 8, 0, Math.PI * 2);
+          ctx.moveTo(anim.x, anim.y);
+          ctx.lineTo(anim.x + Math.cos(heading) * (r + 3.5), anim.y + Math.sin(heading) * (r + 3.5));
           ctx.stroke();
+
+          if (anim.isDiseased) {
+            ctx.strokeStyle = '#d2a8ff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          } else if (anim.isPregnant) {
+            ctx.strokeStyle = '#ffa657';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          // Mini barra de energia rápida
+          const barW = 12, barH = 2;
+          const maxE = anim.maxEnergy || 100.0;
+          const energyPct = Math.max(0, Math.min(1, anim.energy / maxE));
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.fillRect(anim.x - barW/2, anim.y - r - 4, barW, barH);
+          ctx.fillStyle = energyPct > 0.5 ? '#3fb950' : (energyPct > 0.25 ? '#e3b341' : '#f78166');
+          ctx.fillRect(anim.x - barW/2, anim.y - r - 4, barW * energyPct, barH);
+        } catch (err) {}
+      });
+    } else {
+      this.animals.forEach(anim => {
+        try {
+          const animSpecies = anim.speciesName || anim.name;
+          const isTargetSpecies = !this.highlightedSpecies || (animSpecies === this.highlightedSpecies);
+
+          ctx.save();
+          if (this.highlightedSpecies && !isTargetSpecies) {
+            ctx.globalAlpha = 0.20;
+          }
+
+          const animSize = anim.genes?.size ?? 0.5;
+          const aScale = 0.35 + animSize * 0.35;
+          drawCreature(ctx, anim.genes || {}, anim.x, anim.y, aScale, anim.customImages || {});
+
+          if (anim.isDiseased) {
+            ctx.strokeStyle = '#d2a8ff';
+            ctx.lineWidth = 1.8;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.arc(anim.x, anim.y, 14 + animSize * 10, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          if (anim.isPregnant) {
+            ctx.strokeStyle = '#ffa657';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(anim.x, anim.y, 12 + animSize * 8, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+
+          const barW = 18, barH = 3;
+          const maxE = anim.maxEnergy || 100.0;
+          const energyPct = Math.max(0, anim.energy / maxE);
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(anim.x - barW/2, anim.y - 18, barW, barH);
+          ctx.fillStyle = anim.isDiseased
+            ? '#d2a8ff'
+            : (anim.isPregnant ? '#ffa657' : (energyPct > 0.5 ? '#3fb950' : (energyPct > 0.25 ? '#e3b341' : '#f78166')));
+          ctx.fillRect(anim.x - barW/2, anim.y - 18, barW * energyPct, barH);
+          ctx.restore();
+        } catch (err) {
+          ctx.restore();
         }
-
-        const barW = 18, barH = 3;
-        const maxE = anim.maxEnergy || 100.0;
-        const energyPct = Math.max(0, anim.energy / maxE);
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(anim.x - barW/2, anim.y - 18, barW, barH);
-        ctx.fillStyle = anim.isDiseased
-          ? '#d2a8ff'
-          : (anim.isPregnant ? '#ffa657' : (energyPct > 0.5 ? '#3fb950' : (energyPct > 0.25 ? '#e3b341' : '#f78166')));
-        ctx.fillRect(anim.x - barW/2, anim.y - 18, barW * energyPct, barH);
-        ctx.restore();
-      } catch (err) {
-        ctx.restore();
-      }
-
-      if (this.highlightedSpecies && isTargetSpecies) {
-        ctx.save();
-        const pulse = (Math.sin(Date.now() * 0.007) + 1) * 0.5;
-        const spData = this.speciesCatalog.find(s => s.name === animSpecies);
-        const glowColor = spData ? spData.color : '#58a6ff';
-        const ringRadius = 18 + anim.genes.size * 12 + pulse * 5;
-
-        ctx.strokeStyle = glowColor;
-        ctx.lineWidth = 2.5;
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 14;
-        ctx.beginPath();
-        ctx.arc(anim.x, anim.y, ringRadius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.fillStyle = glowColor;
-        const topY = anim.y - ringRadius - 6;
-        ctx.beginPath();
-        ctx.moveTo(anim.x, topY);
-        ctx.lineTo(anim.x - 5, topY - 8);
-        ctx.lineTo(anim.x + 5, topY - 8);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-    });
+      });
+    }
 
     if (this.selectedEntity) {
       const isAlive = this.selectedEntity.type === 'animal'

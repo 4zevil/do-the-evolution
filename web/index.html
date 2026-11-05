@@ -692,7 +692,7 @@
 
           <div class="cfg-row">
             <label>🥩 Saciedade dos Predadores</label>
-            <input type="range" id="world-predator-satiety" min="40" max="95" step="5" value="65"
+            <input type="range" id="world-predator-satiety" min="10" max="95" step="5" value="65"
               oninput="document.getElementById('world-predator-satiety-val').textContent = this.value + '%'" />
             <span class="cfg-val" id="world-predator-satiety-val">65%</span>
             <span class="cfg-unit">de energia</span>
@@ -747,6 +747,7 @@
           <button class="speed-btn" data-speed="2" onclick="setSimSpeed(2)">2x</button>
           <button class="speed-btn" data-speed="5" onclick="setSimSpeed(5)">5x</button>
           <button class="speed-btn" data-speed="10" onclick="setSimSpeed(10)">10x</button>
+          <button class="speed-btn" data-speed="20" onclick="setSimSpeed(20)" title="Velocidade Turbo 20x">20x ⚡</button>
         </div>
 
         <!-- CONTROLES DE ZOOM E CÂMERA -->
@@ -779,6 +780,9 @@
         <!-- BOTÃO DE ATIVAR/DESATIVAR GRADE -->
         <button id="btn-toggle-grid" class="btn btn-secondary btn-sm active" onclick="engine.toggleGridLines()" title="Ocultar/Exibir Linhas da Grade">
           🔲 Grade
+        </button>
+        <button id="btn-toggle-simplified" class="btn btn-secondary btn-sm" onclick="toggleSimplifiedSprites()" title="Alternar Modo de Alto Desempenho (Sprites Simplificados)">
+          ⚡ Modo Rápido: Desligado
         </button>
       </div>
 
@@ -901,6 +905,7 @@
           <button class="speed-btn console-speed-btn" data-speed="2" onclick="setSimSpeed(2)">2x</button>
           <button class="speed-btn console-speed-btn" data-speed="5" onclick="setSimSpeed(5)">5x</button>
           <button class="speed-btn console-speed-btn" data-speed="10" onclick="setSimSpeed(10)">10x</button>
+          <button class="speed-btn console-speed-btn" data-speed="20" onclick="setSimSpeed(20)">20x ⚡</button>
         </div>
 
         <div class="sim-badges">
@@ -1280,7 +1285,7 @@
                   <label class="control-title">🥩 Saciedade dos Predadores</label>
                   <span class="control-val" id="val-predator-satiety">65%</span>
                 </div>
-                <input type="range" id="setting-predator-satiety" min="40" max="95" step="5" value="65" oninput="document.getElementById('val-predator-satiety').textContent = this.value + '%'; systemConsole.applyBalanceSetting('predatorSatietyThreshold', this.value / 100);" />
+                <input type="range" id="setting-predator-satiety" min="10" max="95" step="5" value="65" oninput="document.getElementById('val-predator-satiety').textContent = this.value + '%'; systemConsole.applyBalanceSetting('predatorSatietyThreshold', this.value / 100);" />
                 <p class="control-help">Predadores com energia acima deste valor descansam em vez de caçar, dando tempo para as presas se multiplicarem.</p>
               </div>
 

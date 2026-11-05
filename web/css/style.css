@@ -1588,3 +1588,11 @@ body {
   accent-color: var(--accent);
   cursor: pointer;
 }
+
+/* ── BOTÃO MODO RÁPIDO / PERFORMANCE ── */
+#btn-toggle-simplified.active {
+  background: rgba(63, 185, 80, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
