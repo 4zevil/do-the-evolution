@@ -143,6 +143,8 @@ class SimulationEngine {
     this.speciesRegistry = {};
 
     this.history = [];
+    this.disasterEffects = [];
+    this.impactWinterTicks = 0;
 
     // Contadores temporários para diagnóstico da vegetação.
 this.plantMetrics = {
@@ -1170,7 +1172,12 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
         this.generation++;
       }
     }
-    const curSeason = SEASONS[this.seasonIndex];
+    const curSeason = { ...SEASONS[this.seasonIndex] };
+    if (this.impactWinterTicks > 0) {
+      this.impactWinterTicks--;
+      curSeason.sunlight = Math.max(0.15, curSeason.sunlight * 0.35);
+      curSeason.temp -= 0.40;
+    }
 
     if (this.tickCount % this.historyInterval === 0) {
       this.recordHistorySnapshot();
@@ -1298,6 +1305,12 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
       const waterFactor = Math.min(1.0, cell.moisture * (0.7 + (g.rootEfficiency || 0.5) * 0.6));
       const liebig = Math.min(lightFactor, nitrogenFactor, waterFactor) / thermalPlantFactor;
 
+      // ── LONGEVIDADE E SENESCÊNCIA GENÉTICA ──
+      // Plantas pioneiras/rápidas têm ciclo de vida mais curto (260-380 ticks);
+      // Plantas robustas, altas e espinhosas vivem mais (500-800 ticks), investindo em biomassa perene.
+      const baseLifespan = 320 + ((g.height || 0.5) * 320) + ((g.defense || 0.3) * 180) - ((g.growthSpeed || 0.5) * 140);
+      const plantMaxAge = Math.max(180, Math.round(baseLifespan));
+
       if (cell.soilNitrogen >= maintenanceCost) {
         this.plantMetrics.growthUpdates++;
 
@@ -1306,47 +1319,90 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
         const growthDelta = 0.016 * leafAreaFactor * (0.5 + (g.growthSpeed || 0.5) * 0.8) * liebig;
         plant.growth = Math.min(1.0, plant.growth + growthDelta);
 
-        if (plant.growth >= 0.70) {
+        // Fotossíntese revigora energia celular em boas condições ambientais
+        if (liebig > 0.35 && plant.energy < 45.0) {
+          plant.energy = Math.min(45.0, plant.energy + 0.12 * liebig);
+        }
+
+        if (plant.growth >= 0.68) {
           plant.hasFruit = true;
           plant.fruitCount = Math.round(1 + (g.fruitAttraction || 0.4) * 4);
         }
       } else {
         this.plantMetrics.growthBlocked++;
-       plant.energy -= 0.22;
-
-// Registra a causa da remoção da planta.
-if (plant.energy <= 0 || plant.age > 500) {
-  if (plant.energy <= 0) {
-    this.plantMetrics.nutrientDeaths++;
-  } else {
-    this.plantMetrics.ageDeaths++;
-  }
-
-  cell.organicBiomass += plant.growth * 10.0;
-  cell.plant = null;
-  this.plants.splice(idx, 1);
-  continue;
-}
+        // Estresse fisiológico por falta de nitrogênio no solo
+        plant.energy -= 0.32 * (1.0 + (g.height || 0.5) * 0.4);
       }
 
-      // Dispersão e reprodução
-      // Taxa aumentada de 0.006 para 0.014 — plantas precisam se recuperar mais rápido do pastoreio
-      const reproThreshold = 0.014 * (g.growthSpeed || 0.5);
-      if (plant.hasFruit && Math.random() < reproThreshold && this.plants.length < this.gridCols * this.gridRows * 0.60) {
-        const windReach = Math.max(1, Math.round(1 + (g.height || 0.5) * 3));
+      // Estresse por seca ou desajuste térmico severo
+      if (liebig < 0.20) {
+        plant.energy -= 0.14;
+      }
+
+      // Senescência avançada: plantas idosas entram em declínio fisiológico
+      if (plant.age > plantMaxAge * 0.85) {
+        plant.energy -= 0.18;
+      }
+
+      // ── MORTALIDADE NATURAL (SENESCÊNCIA OU ESGOTAMENTO NUTRICIONAL) ──
+      if (plant.age >= plantMaxAge || plant.energy <= 0) {
+        if (plant.energy <= 0) {
+          this.plantMetrics.nutrientDeaths++;
+        } else {
+          this.plantMetrics.ageDeaths++;
+        }
+
+        // Ciclagem de matéria orgânica no solo (enriquece o solo para a próxima geração)
+        cell.organicBiomass = Math.min(80.0, cell.organicBiomass + plant.growth * 12.0);
+        cell.soilNitrogen = Math.min(60.0, cell.soilNitrogen + 2.0);
+        if (cell.plant === plant) {
+          cell.plant = null;
+        }
+        this.plants.splice(idx, 1);
+        continue;
+      }
+
+      // ── DISPERSÃO E REPRODUÇÃO SEXUADA COM POLINIZAÇÃO CRUZADA & MUTAÇÃO ──
+      const reproThreshold = 0.015 * (g.growthSpeed || 0.5);
+      if (plant.hasFruit && Math.random() < reproThreshold && this.plants.length < this.gridCols * this.gridRows * 0.70) {
+        const windReach = Math.max(1, Math.round(1 + (g.height || 0.5) * 4));
         const dr = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
         const dc = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
         const nr = plant.r + dr, nc = plant.c + dc;
 
         if (this.grid[nr]?.[nc] && this.grid[nr][nc].biome !== 'water' && !this.grid[nr][nc].plant) {
+          // Polinização cruzada: busca parceiro fértil próximo (troca de pólen pelo vento/insetos)
+          let partnerGenes = g;
+          const searchRadius = 3;
+          for (let pr = Math.max(0, plant.r - searchRadius); pr <= Math.min(this.gridRows - 1, plant.r + searchRadius); pr++) {
+            for (let pc = Math.max(0, plant.c - searchRadius); pc <= Math.min(this.gridCols - 1, plant.c + searchRadius); pc++) {
+              const other = this.grid[pr]?.[pc]?.plant;
+              if (other && other !== plant && other.hasFruit) {
+                partnerGenes = other.genes || g;
+                break;
+              }
+            }
+            if (partnerGenes !== g) break;
+          }
+
+          const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
           const childGenes = {};
-          Object.keys(g).forEach(k => {
+          const allGeneKeys = ['height', 'rootEfficiency', 'growthSpeed', 'defense', 'fruitAttraction', 'parasiteResistance', 'thermal', 'colorHue'];
+
+          allGeneKeys.forEach(k => {
+            const geneA = g[k] ?? (k === 'colorHue' ? 110 : (k === 'thermal' ? 0.0 : 0.5));
+            const geneB = partnerGenes[k] ?? geneA;
+            const avg = (geneA + geneB) / 2;
+
             if (k === 'colorHue') {
-              childGenes[k] = Math.round(((g[k] || 110) + (Math.random() * 24 - 12) + 360) % 360);
+              const hueMut = (Math.random() * 26 - 13) * mutMul;
+              childGenes[k] = Math.round((avg + hueMut + 360) % 360);
             } else if (k === 'thermal') {
-              childGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, (g[k] || 0) + (Math.random() * 0.12 - 0.06))).toFixed(2));
+              const thermMut = (Math.random() * 0.12 - 0.06) * mutMul;
+              childGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, avg + thermMut)).toFixed(2));
             } else {
-              childGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, g[k] + (Math.random() * 0.12 - 0.06))).toFixed(2));
+              const genMut = (Math.random() * 0.12 - 0.06) * mutMul;
+              childGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, avg + genMut)).toFixed(2));
             }
           });
 
@@ -1359,7 +1415,7 @@ if (plant.energy <= 0 || plant.age > 500) {
           let childSpeciesName = baseName;
 
           if (speciation.diverged) {
-            childSpeciesName = `${rootName} ${speciation.desc}`;
+            childSpeciesName = rootName + ' ' + speciation.desc;
             const isNew = this.registerSpecies(
               childSpeciesName,
               'plant',
@@ -1370,7 +1426,7 @@ if (plant.energy <= 0 || plant.age > 500) {
             );
 
             if (isNew && typeof toast === 'function') {
-              toast(`🌿 Nova Linhagem Vegetal: "${childSpeciesName}" evoluiu por adaptação de ${speciation.traitName}!`);
+              toast('🌿 Nova Linhagem Vegetal: "' + childSpeciesName + '" evoluiu por adaptação de ' + speciation.traitName + '!');
             }
           }
 
@@ -1380,7 +1436,7 @@ if (plant.energy <= 0 || plant.age > 500) {
             r: nr, c: nc,
             x: (nc + 0.5) * this.cellSize,
             y: (nr + 0.5) * this.cellSize,
-            energy: 35.0,
+            energy: 36.0,
             growth: 0.18,
             hasFruit: false,
             fruitCount: 0,
@@ -1394,13 +1450,26 @@ if (plant.energy <= 0 || plant.age > 500) {
         }
       }
 
-      // Propagação vegetativa clonal (rizomas/estolões): permite colonização contínua sem depender apenas de frutos
-      if (this.equilibriumSettings?.vegetativeSpreading && plant.growth >= 0.30 && Math.random() < 0.008 * (g.growthSpeed || 0.5) && this.plants.length < this.gridCols * this.gridRows * 0.65) {
+      // ── PROPAGAÇÃO VEGETATIVA CLONAL (RIZOMAS / ESTOLÕES) ──
+      if (this.equilibriumSettings?.vegetativeSpreading && plant.growth >= 0.30 && Math.random() < 0.009 * (g.growthSpeed || 0.5) && this.plants.length < this.gridCols * this.gridRows * 0.70) {
         const deltas = [[1,0], [-1,0], [0,1], [0,-1]];
         const [dr, dc] = deltas[Math.floor(Math.random() * deltas.length)];
         const nr = plant.r + dr, nc = plant.c + dc;
 
-        if (this.grid[nr]?.[nc] && this.grid[nr][nc].biome !== 'water' && !this.grid[nr][nc].plant && this.grid[nr][nc].soilNitrogen > 10.0) {
+        if (this.grid[nr]?.[nc] && this.grid[nr][nc].biome !== 'water' && !this.grid[nr][nc].plant && this.grid[nr][nc].soilNitrogen > 8.0) {
+          const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
+          const cloneGenes = { ...g };
+          // Variação somaclonal sutil
+          if (Math.random() < 0.25 * mutMul) {
+            const keys = ['height', 'defense', 'rootEfficiency', 'growthSpeed', 'colorHue'];
+            const rk = keys[Math.floor(Math.random() * keys.length)];
+            if (rk === 'colorHue') {
+              cloneGenes[rk] = Math.round((cloneGenes[rk] + (Math.random() * 8 - 4) + 360) % 360);
+            } else {
+              cloneGenes[rk] = parseFloat(Math.max(0.05, Math.min(1.0, (cloneGenes[rk] || 0.5) + (Math.random() * 0.06 - 0.03))).toFixed(2));
+            }
+          }
+
           const clonePlant = {
             id: 'plant_' + Math.random().toString(36).substr(2, 9),
             name: plant.name,
@@ -1412,7 +1481,7 @@ if (plant.energy <= 0 || plant.age > 500) {
             hasFruit: false,
             fruitCount: 0,
             age: 0,
-            genes: { ...g },
+            genes: cloneGenes,
             customImages: plant.customImages
           };
           this.grid[nr][nc].plant = clonePlant;
@@ -1423,49 +1492,61 @@ if (plant.energy <= 0 || plant.age > 500) {
     }
 
     // 3.1 BANCO DE SEMENTES NO SOLO (HOMEOSTASE E SUCESSÃO ECOLÓGICA SECUNDÁRIA)
-    // Permite que sementes dormentes no solo fértil brotem quando a vegetação sofre pressão de sobrepastoreio
-    const targetPlantCap = this.gridCols * this.gridRows * 0.45;
+    const targetPlantCap = this.gridCols * this.gridRows * 0.48;
     const isPlantUnderPressure = this.plants.length < targetPlantCap;
+    const isCriticallyLow = this.plants.length < 35; // Salvaguarda anti-colapso
     const baseSeedRate = this.equilibriumSettings?.seedBankRate ?? 0.14;
-    const effectiveSeedRate = isPlantUnderPressure ? baseSeedRate * 1.5 : baseSeedRate * 0.4;
+    const effectiveSeedRate = isCriticallyLow ? 0.95 : (isPlantUnderPressure ? baseSeedRate * 1.6 : baseSeedRate * 0.4);
 
-    if (Math.random() < effectiveSeedRate && this.plants.length < this.gridCols * this.gridRows * 0.65) {
-      const randR = Math.floor(Math.random() * this.gridRows);
-      const randC = Math.floor(Math.random() * this.gridCols);
-      const candidateCell = this.grid[randR]?.[randC];
+    const seedBursts = isCriticallyLow ? 3 : 1;
+    for (let b = 0; b < seedBursts; b++) {
+      if (Math.random() < effectiveSeedRate && this.plants.length < this.gridCols * this.gridRows * 0.70) {
+        const randR = Math.floor(Math.random() * this.gridRows);
+        const randC = Math.floor(Math.random() * this.gridCols);
+        const candidateCell = this.grid[randR]?.[randC];
 
-      if (candidateCell && candidateCell.biome !== 'water' && !candidateCell.plant && candidateCell.soilNitrogen > 15.0 && candidateCell.moisture > 0.20) {
-        const knownPlantSpecies = this.speciesCatalog.filter(s => s.type === 'plant');
-        const templateSpecies = knownPlantSpecies.length > 0 ? knownPlantSpecies[Math.floor(Math.random() * knownPlantSpecies.length)] : null;
-        const baseGenes = (templateSpecies && (templateSpecies.founderGenes || templateSpecies.genes))
-          ? (templateSpecies.founderGenes || templateSpecies.genes)
-          : { growthSpeed: 0.5, height: 0.5, defense: 0.3, rootEfficiency: 0.5, thermal: 0.0 };
+        if (candidateCell && candidateCell.biome !== 'water' && !candidateCell.plant && candidateCell.soilNitrogen > (isCriticallyLow ? 5.0 : 12.0) && candidateCell.moisture > 0.15) {
+          const knownPlantSpecies = this.speciesCatalog.filter(s => s.type === 'plant');
+          const templateSpecies = knownPlantSpecies.length > 0 ? knownPlantSpecies[Math.floor(Math.random() * knownPlantSpecies.length)] : null;
+          const baseGenes = (templateSpecies && (templateSpecies.founderGenes || templateSpecies.genes))
+            ? (templateSpecies.founderGenes || templateSpecies.genes)
+            : { growthSpeed: 0.6, height: 0.4, defense: 0.25, rootEfficiency: 0.6, thermal: 0.0, colorHue: 115 };
 
-        const seedlingGenes = {};
-        Object.keys(baseGenes).forEach(k => {
-          const val = baseGenes[k];
-          seedlingGenes[k] = typeof val === 'number'
-            ? parseFloat(Math.max(0.05, Math.min(1.0, val + (Math.random() * 0.08 - 0.04))).toFixed(2))
-            : val;
-        });
+          const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
+          const seedlingGenes = {};
+          Object.keys(baseGenes).forEach(k => {
+            const val = baseGenes[k];
+            if (typeof val === 'number') {
+              if (k === 'colorHue') {
+                seedlingGenes[k] = Math.round((val + (Math.random() * 20 - 10) * mutMul + 360) % 360);
+              } else if (k === 'thermal') {
+                seedlingGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, val + (Math.random() * 0.1 - 0.05) * mutMul)).toFixed(2));
+              } else {
+                seedlingGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, val + (Math.random() * 0.1 - 0.05) * mutMul)).toFixed(2));
+              }
+            } else {
+              seedlingGenes[k] = val;
+            }
+          });
 
-        const seedling = {
-          id: 'plant_' + Math.random().toString(36).substr(2, 9),
-          name: templateSpecies ? templateSpecies.name : 'Grama Pioneira',
-          r: randR, c: randC,
-          x: (randC + 0.5) * this.cellSize,
-          y: (randR + 0.5) * this.cellSize,
-          energy: 32.0,
-          growth: 0.18,
-          hasFruit: false,
-          fruitCount: 0,
-          age: 0,
-          genes: seedlingGenes,
-          customImages: templateSpecies?.customImages ? { ...templateSpecies.customImages } : {}
-        };
-        candidateCell.plant = seedling;
-        this.plants.push(seedling);
-        this.plantMetrics.reproduced++;
+          const seedling = {
+            id: 'plant_' + Math.random().toString(36).substr(2, 9),
+            name: templateSpecies ? templateSpecies.name : 'Grama Pioneira',
+            r: randR, c: randC,
+            x: (randC + 0.5) * this.cellSize,
+            y: (randR + 0.5) * this.cellSize,
+            energy: 34.0,
+            growth: 0.18,
+            hasFruit: false,
+            fruitCount: 0,
+            age: 0,
+            genes: seedlingGenes,
+            customImages: templateSpecies?.customImages ? { ...templateSpecies.customImages } : {}
+          };
+          candidateCell.plant = seedling;
+          this.plants.push(seedling);
+          this.plantMetrics.reproduced++;
+        }
       }
     }
 
@@ -1625,7 +1706,7 @@ if (anim.age < 50) {
       anim.x += anim.vx;
       anim.y += anim.vy;
 
-      // Germinação zoocórica
+      // Germinação zoocórica com especiação e dispersão
       if (anim.carriedSeed) {
         anim.carriedSeed.dropTimer--;
         if (anim.carriedSeed.dropTimer <= 0) {
@@ -1633,15 +1714,38 @@ if (anim.age < 50) {
           const ac = Math.floor(anim.x / this.cellSize);
           const targetCell = this.grid[ar]?.[ac];
 
-          if (targetCell && targetCell.biome !== 'water' && !targetCell.plant && this.plants.length < this.gridCols * this.gridRows * 0.60) {
+          if (targetCell && targetCell.biome !== 'water' && !targetCell.plant && this.plants.length < this.gridCols * this.gridRows * 0.70) {
+            const baseName = anim.carriedSeed.speciesName;
+            const speciesData = this.speciesRegistry[baseName] || {};
+            const founderGenes = speciesData.founderGenes || anim.carriedSeed.genes;
+            const rootName = speciesData.rootName || baseName.replace(/\s*(Espinhosa|Indefesa|Gigante|Rasteira|Árida|Aquática|Pioneira|Tardia|Tropical|Boreal)/g, '').trim();
+
+            const speciation = evaluatePlantSpeciation(anim.carriedSeed.genes, founderGenes);
+            let childSpeciesName = baseName;
+
+            if (speciation.diverged) {
+              childSpeciesName = rootName + ' ' + speciation.desc;
+              const isNew = this.registerSpecies(
+                childSpeciesName,
+                'plant',
+                anim.carriedSeed.genes,
+                baseName,
+                rootName,
+                speciation.traitName + ' ' + speciation.desc
+              );
+              if (isNew && typeof toast === 'function') {
+                toast('🌿 Nova Linhagem Vegetal (Zoocoria): "' + childSpeciesName + '" germinou após dispersão animal!');
+              }
+            }
+
             const seedPlant = {
               id: 'plant_' + Math.random().toString(36).substr(2, 9),
-              name: anim.carriedSeed.speciesName,
+              name: childSpeciesName,
               r: ar, c: ac,
               x: (ac + 0.5) * this.cellSize,
               y: (ar + 0.5) * this.cellSize,
               energy: 40.0,
-              growth: 0.25,
+              growth: 0.22,
               hasFruit: false,
               fruitCount: 0,
               age: 0,
@@ -1651,6 +1755,7 @@ if (anim.age < 50) {
             targetCell.plant = seedPlant;
             targetCell.organicBiomass = Math.min(80.0, targetCell.organicBiomass + 5.0);
             this.plants.push(seedPlant);
+            this.plantMetrics.reproduced++;
           }
           anim.carriedSeed = null;
         }
@@ -1934,7 +2039,7 @@ anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
         }
       }
       
-      // C. Herbivoria & MECANISMO 3: SOBREPASTOREIO (OVERGRAZING)
+      // C. Herbivoria & MECANISMO 3: SOBREPASTOREIO (OVERGRAZING) COM PRESSÃO COEVOLUTIVA
       if ((g.diet?.plant || 0) > 0.20 && !targetX) {
         let bestPlant = null, minPlDist = viewDist;
         this.plants.forEach(pl => {
@@ -1956,41 +2061,60 @@ anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
             this.aiMetrics.herbivoreMeals++;
             anim.vx *= 0.1; anim.vy *= 0.1;
 
-            // PRESSÃO COEVOLUTIVA: Espinhos/toxinas (defense) reduzem o dano e ferem o herbívoro
-            const defenseFactor = Math.max(0.2, 1.0 - (bestPlant.genes.defense || 0) * 0.75);
-            const biteAmount = Math.min(bestPlant.growth * 0.6, 0.28) * defenseFactor;
+            // PRESSÃO COEVOLUTIVA: Espinhos/toxinas (defense) reduzem a mordida e machucam o herbívoro
+            const plantDef = bestPlant.genes?.defense || 0;
+            const defenseFactor = Math.max(0.18, 1.0 - plantDef * 0.75);
+            const biteAmount = Math.min(bestPlant.growth * 0.65, 0.30) * defenseFactor;
 
-            // Se a planta é altamente armada, o herbívoro sofre dano de repulsa
-            if ((bestPlant.genes.defense || 0) > 0.45) {
-              const thornDamage = (bestPlant.genes.defense - 0.45) * 12.0;
+            // Defesas ativas ferem o herbívoro
+            if (plantDef > 0.40) {
+              const thornDamage = (plantDef - 0.40) * 14.0;
               anim.energy = Math.max(1.0, anim.energy - thornDamage);
               anim.stateLabel = 'Repelido por Espinhos/Toxina!';
             }
 
-            // Calcula a energia obtida com assimilação melhorada
+            // Ganho calórico do herbívoro
             const calories = (Math.max(0.06, biteAmount) / 0.20) * (bestPlant.hasFruit ? 26.0 : 18.0);
             const absorbedEnergy = calories * 0.85;
             anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
 
-            // ZOOCORIA: Comer fruto maduro transporta semente no intestino do animal
-            if (bestPlant.hasFruit && Math.random() < (bestPlant.genes.fruitAttraction || 0.4)) {
+            // A planta perde energia proporcional à desfoliação
+            bestPlant.energy -= biteAmount * 16.0;
+
+            // ZOOCORIA: Fruto consumido gera semente fecundada no trato digestivo com mutação
+            if (bestPlant.hasFruit && Math.random() < (bestPlant.genes?.fruitAttraction || 0.4)) {
+              const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
+              const seedGenes = {};
+              const bg = bestPlant.genes || {};
+              const allGeneKeys = ['height', 'rootEfficiency', 'growthSpeed', 'defense', 'fruitAttraction', 'parasiteResistance', 'thermal', 'colorHue'];
+
+              allGeneKeys.forEach(k => {
+                const val = bg[k] ?? (k === 'colorHue' ? 110 : (k === 'thermal' ? 0.0 : 0.5));
+                if (k === 'colorHue') {
+                  seedGenes[k] = Math.round((val + (Math.random() * 26 - 13) * mutMul + 360) % 360);
+                } else if (k === 'thermal') {
+                  seedGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, val + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2));
+                } else {
+                  seedGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, val + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2));
+                }
+              });
+
               anim.carriedSeed = {
                 speciesName: bestPlant.name,
-                genes: JSON.parse(JSON.stringify(bestPlant.genes)),
+                genes: seedGenes,
                 customImages: bestPlant.customImages,
-                dropTimer: Math.round(25 + Math.random() * 40)
+                dropTimer: Math.round(20 + Math.random() * 35)
               };
             }
 
-            // SOBREVIVÊNCIA E RESILIÊNCIA AO PASTOREIO (Raízes protegidas)
+            // SOBREVIVÊNCIA E RESILIÊNCIA AO PASTOREIO (Overgrazing)
             const remainingGrowth = bestPlant.growth - biteAmount;
-            // Só morre definitivamente se for comida abaixo de 0.03 e com reserva esgotada
-            if (remainingGrowth < 0.03 && bestPlant.energy < 12.0) {
+            if (remainingGrowth < 0.08 || bestPlant.energy <= 4.0) {
               const cell = this.grid[bestPlant.r]?.[bestPlant.c];
               if (cell && cell.plant === bestPlant) cell.plant = null;
               this.plantMetrics.grazingDeaths++;
               if (cell) {
-                const remainingBiomass = Math.max(0, remainingGrowth) * 10.0;
+                const remainingBiomass = Math.max(0, remainingGrowth) * 8.0;
                 cell.organicBiomass = Math.min(80.0, cell.organicBiomass + remainingBiomass);
               }
 
@@ -1999,7 +2123,7 @@ anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
               anim.stateLabel = 'Arrancou raiz (Overgrazing)!';
             } else {
               // A planta fica podada e preserva a raiz para rebrotar com vigor
-              bestPlant.growth = Math.max(0.05, remainingGrowth);
+              bestPlant.growth = Math.max(0.06, remainingGrowth);
               bestPlant.hasFruit = false;
             }
             return;
@@ -2575,8 +2699,289 @@ reinjectPioneers(count = 18) {
       ctx.fillRect(0, 0, W, H);
       ctx.restore();
     }
+
+    // ── 5. EFEITOS VISUAIS DE CATÁSTROFE & METEORO ──
+    if (this.disasterEffects && this.disasterEffects.length > 0) {
+      for (let i = this.disasterEffects.length - 1; i >= 0; i--) {
+        const eff = this.disasterEffects[i];
+        if (eff.type === 'meteor') {
+          if (eff.phase === 'falling') {
+            eff.progress += eff.fallSpeed;
+            const curX = eff.startX + (eff.targetX - eff.startX) * eff.progress;
+            const curY = eff.startY + (eff.targetY - eff.startY) * eff.progress;
+
+            ctx.save();
+            // Cauda de plasma incandescente
+            ctx.strokeStyle = '#ff6f00';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(eff.startX, eff.startY);
+            ctx.lineTo(curX, curY);
+            ctx.stroke();
+
+            // Núcleo branco-amarelado
+            ctx.strokeStyle = '#fff9c4';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(curX - (eff.targetX - eff.startX) * 0.35, curY - (eff.targetY - eff.startY) * 0.35);
+            ctx.lineTo(curX, curY);
+            ctx.stroke();
+
+            // Cabeça do meteoro
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(curX, curY, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Halo de fogo ao redor da cabeça
+            ctx.fillStyle = 'rgba(255, 87, 34, 0.6)';
+            ctx.beginPath();
+            ctx.arc(curX, curY, 14, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            if (eff.progress >= 1.0) {
+              eff.phase = 'exploding';
+              if (!eff.executedImpact) {
+                eff.executedImpact = true;
+                this.applyMeteorPhysicalImpact(eff);
+              }
+            }
+          } else if (eff.phase === 'exploding') {
+            eff.explosionAge++;
+            const t = eff.explosionAge / eff.maxExplosionAge;
+
+            ctx.save();
+            // Clarão térmico nos primeiros 3 frames
+            if (eff.explosionAge <= 3) {
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+              ctx.fillRect(0, 0, W, H);
+            }
+
+            // Onda de choque em expansão
+            eff.shockwaveRadius = t * eff.maxShockwaveRadius;
+            const shockAlpha = Math.max(0, 1.0 - t);
+            ctx.strokeStyle = `rgba(255, 140, 0, ${shockAlpha})`;
+            ctx.lineWidth = Math.max(1, 4.5 * (1.0 - t));
+            ctx.beginPath();
+            ctx.arc(eff.targetX, eff.targetY, eff.shockwaveRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Segunda onda interna
+            if (t > 0.15) {
+              const t2 = (t - 0.15) / 0.85;
+              ctx.strokeStyle = `rgba(255, 215, 0, ${Math.max(0, 0.8 - t2)})`;
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.arc(eff.targetX, eff.targetY, t2 * eff.maxShockwaveRadius * 0.75, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+
+            // Brilho térmico da cratera
+            ctx.fillStyle = `rgba(255, 69, 0, ${Math.max(0, 0.75 - t * 0.75)})`;
+            ctx.beginPath();
+            ctx.arc(eff.targetX, eff.targetY, eff.craterRadiusPx * (0.8 + t * 0.2), 0, Math.PI * 2);
+            ctx.fill();
+
+            // Partículas incandescentes e estilhaços
+            eff.particles.forEach(p => {
+              p.x += p.vx;
+              p.y += p.vy;
+              p.life -= p.decay;
+              if (p.life > 0) {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = Math.max(0, p.life);
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            });
+            ctx.restore();
+
+            if (eff.explosionAge >= eff.maxExplosionAge) {
+              this.disasterEffects.splice(i, 1);
+            }
+          }
+        }
+      }
+    }
+
+    // ── 6. NÉVOA DO INVERNO DE IMPACTO (POEIRA ESTRATOSFÉRICA) ──
+    if (this.impactWinterTicks > 0) {
+      ctx.save();
+      const intensity = Math.min(1.0, this.impactWinterTicks / 50.0);
+      ctx.fillStyle = `rgba(45, 35, 30, ${0.30 * intensity})`;
+      ctx.fillRect(0, 0, W, H);
+
+      // Partículas de cinzas em suspensão caindo suavemente
+      ctx.fillStyle = 'rgba(200, 190, 180, 0.45)';
+      const ashSeed = (this.tickCount * 2) % 100;
+      for (let s = 0; s < 22; s++) {
+        const ax = ((s * 47 + ashSeed * 7) % W);
+        const ay = ((s * 31 + this.tickCount * 3) % H);
+        ctx.fillRect(ax, ay, 2, 2);
+      }
+      ctx.restore();
+    }
   }
-  
+
+  // ── MÉTODOS DE CATÁSTROFE: METEORO ──
+  triggerMeteor(targetX = null, targetY = null) {
+    if (targetX === null || targetY === null) {
+      if (this.animals.length > 0 && Math.random() < 0.75) {
+        const targetAnim = this.animals[Math.floor(Math.random() * this.animals.length)];
+        targetX = targetAnim.x + (Math.random() * 40 - 20);
+        targetY = targetAnim.y + (Math.random() * 40 - 20);
+      } else {
+        targetX = (0.2 + Math.random() * 0.6) * (this.gridCols * this.cellSize);
+        targetY = (0.2 + Math.random() * 0.6) * (this.gridRows * this.cellSize);
+      }
+    }
+
+    targetX = Math.max(25, Math.min(this.gridCols * this.cellSize - 25, targetX));
+    targetY = Math.max(25, Math.min(this.gridRows * this.cellSize - 25, targetY));
+
+    this.disasterEffects ??= [];
+    const meteorEffect = {
+      type: 'meteor',
+      phase: 'falling',
+      startX: targetX - 260,
+      startY: targetY - 360,
+      targetX: targetX,
+      targetY: targetY,
+      progress: 0,
+      fallSpeed: 0.065,
+      explosionAge: 0,
+      maxExplosionAge: 36,
+      particles: [],
+      shockwaveRadius: 0,
+      maxShockwaveRadius: 115,
+      craterRadiusPx: 48,
+      executedImpact: false
+    };
+
+    for (let i = 0; i < 50; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2.0 + Math.random() * 6.5;
+      meteorEffect.particles.push({
+        x: targetX,
+        y: targetY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: 2.0 + Math.random() * 3.5,
+        color: Math.random() < 0.5 ? '#ff5722' : (Math.random() < 0.5 ? '#ffeb3b' : '#ffffff'),
+        life: 1.0,
+        decay: 0.02 + Math.random() * 0.03
+      });
+    }
+
+    this.disasterEffects.push(meteorEffect);
+
+    if (typeof toast === 'function') {
+      toast('☄️ CATÁSTROFE: Meteoro penetrou na atmosfera em direção ao quadrante!');
+    }
+  }
+
+  applyMeteorPhysicalImpact(effect) {
+    const targetX = effect.targetX;
+    const targetY = effect.targetY;
+    const craterCellRadius = 2.5;
+    const shockRadiusPx = effect.maxShockwaveRadius || 115;
+
+    let destroyedPlants = 0;
+    let vaporizedAnimals = 0;
+    let damagedAnimals = 0;
+
+    // 1. TERRENO E CRATERA
+    for (let r = 0; r < this.gridRows; r++) {
+      for (let c = 0; c < this.gridCols; c++) {
+        const cell = this.grid[r]?.[c];
+        if (!cell) continue;
+
+        const cellCenterX = (c + 0.5) * this.cellSize;
+        const cellCenterY = (r + 0.5) * this.cellSize;
+        const dist = Math.hypot(cellCenterX - targetX, cellCenterY - targetY);
+        const distInCells = dist / this.cellSize;
+
+        if (distInCells <= craterCellRadius) {
+          cell.biome = 'rocky';
+          cell.soilNitrogen = Math.max(0.5, cell.soilNitrogen * 0.1);
+          cell.moisture = Math.max(0.05, cell.moisture * 0.15);
+          cell.organicBiomass = Math.min(80.0, cell.organicBiomass + 30.0);
+
+          if (cell.plant) {
+            const pIdx = this.plants.indexOf(cell.plant);
+            if (pIdx !== -1) this.plants.splice(pIdx, 1);
+            cell.plant = null;
+            this.plantMetrics.nutrientDeaths++;
+            destroyedPlants++;
+          }
+        } else if (dist <= shockRadiusPx) {
+          cell.moisture = Math.max(0.05, cell.moisture * 0.4);
+          if (cell.plant && Math.random() < 0.65) {
+            const pIdx = this.plants.indexOf(cell.plant);
+            if (pIdx !== -1) this.plants.splice(pIdx, 1);
+            cell.plant = null;
+            this.plantMetrics.nutrientDeaths++;
+            destroyedPlants++;
+          }
+        }
+      }
+    }
+
+    // 2. FAUNA (Vaporização e Onda de Choque)
+    for (let i = this.animals.length - 1; i >= 0; i--) {
+      const a = this.animals[i];
+      const dist = Math.hypot(a.x - targetX, a.y - targetY);
+
+      if (dist <= effect.craterRadiusPx) {
+        if (Math.random() < 0.45) {
+          const ar = Math.floor(a.y / this.cellSize);
+          const ac = Math.floor(a.x / this.cellSize);
+          const cell = this.grid[ar]?.[ac];
+          if (cell && !cell.carcass) {
+            const carcass = {
+              r: ar, c: ac,
+              x: a.x, y: a.y,
+              remainingEnergy: 20.0,
+              decayTimer: 0,
+              genes: a.genes,
+              speciesName: a.speciesName || a.name
+            };
+            cell.carcass = carcass;
+            this.carcasses.push(carcass);
+          }
+        }
+        this.animals.splice(i, 1);
+        vaporizedAnimals++;
+      } else if (dist <= shockRadiusPx) {
+        const factor = 1.0 - (dist / shockRadiusPx);
+        const damage = factor * 70.0;
+        a.energy -= damage;
+
+        const angle = Math.atan2(a.y - targetY, a.x - targetX);
+        const impulse = factor * 9.0;
+        a.vx += Math.cos(angle) * impulse;
+        a.vy += Math.sin(angle) * impulse;
+        a.stateLabel = 'Queimado por Onda de Choque!';
+
+        if (a.energy <= 0) {
+          this.animals.splice(i, 1);
+          vaporizedAnimals++;
+        } else {
+          damagedAnimals++;
+        }
+      }
+    }
+
+    this.createTerrainCache();
+    this.impactWinterTicks = 140;
+
+    const msg = `💥 IMPACTO! ${vaporizedAnimals} animais e ${destroyedPlants} plantas eliminados! Inverno de Cinzas ativo por 140 ticks!`;
+    if (typeof toast === 'function') toast(msg, 4500);
+    console.log('[CATÁSTROFE]', msg);
+  }
 
   updateStatsUI() {
     const elSeason = document.getElementById('sim-season-badge');
@@ -2588,7 +2993,11 @@ reinjectPioneers(count = 18) {
    const curSeason = SEASONS[this.seasonIndex];
     const effTemp = curSeason.temp + (this.climateTrend || 0);
     const tempDeg = Math.round(18 + effTemp * 16); // Temperatura em graus Celsius realistas
-    if (elSeason) elSeason.innerHTML = `${curSeason.icon} ${curSeason.name} (${tempDeg}°C)`;
+    if (this.impactWinterTicks > 0) {
+      if (elSeason) elSeason.innerHTML = `☄️ Inverno de Impacto (${tempDeg - 6}°C) [${this.impactWinterTicks}t]`;
+    } else {
+      if (elSeason) elSeason.innerHTML = `${curSeason.icon} ${curSeason.name} (${tempDeg}°C)`;
+    }
     if (elGen) elGen.textContent = `Geração ${this.generation}`;
     if (elAnimals) elAnimals.textContent = this.animals.length;
     if (elPlants) elPlants.textContent = this.plants.length;

@@ -1423,7 +1423,7 @@ function initSimulationScreen() {
     }
   });
 
-  // Seleção e inspeção de criaturas
+  // Seleção, mira de catástrofes e inspeção de criaturas
   simCanvas.addEventListener('click', (e) => {
     // Se o usuário estava arrastando o mapa, não dispara a seleção de entidade
     if (simCamera.hasDragged) {
@@ -1434,9 +1434,16 @@ function initSimulationScreen() {
     const rect = simCanvas.getBoundingClientRect();
     const scaleX = simCanvas.width / rect.width;
     const scaleY = simCanvas.height / rect.height;
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top) * scaleY;
+
+    if (window.meteorTargetingActive) {
+      triggerMeteorImpactAt(clickX, clickY);
+      return;
+    }
 
     if (typeof engine !== 'undefined') {
-      engine.selectEntityAt((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+      engine.selectEntityAt(clickX, clickY);
     }
   });
 }
@@ -1644,5 +1651,44 @@ function updateSimplifiedButtonUI() {
   } else {
     btn.innerHTML = '⚡ Modo Rápido: Desligado';
     btn.classList.remove('active');
+  }
+}
+
+// ── CONTROLE DE CATÁSTROFES: MIRA E DISPARO DE METEORO ──
+window.meteorTargetingActive = false;
+
+function toggleMeteorMode() {
+  const btn = document.getElementById('btn-trigger-meteor');
+  const container = document.querySelector('.sim-canvas-area');
+
+  if (window.meteorTargetingActive) {
+    // Segundo clique: dispara aleatório no mapa!
+    window.meteorTargetingActive = false;
+    if (btn) btn.classList.remove('active');
+    if (container) container.classList.remove('targeting-meteor');
+    if (typeof engine !== 'undefined') {
+      engine.triggerMeteor();
+      if (!engine.isRunning) engine.render();
+    }
+    return;
+  }
+
+  window.meteorTargetingActive = true;
+  if (btn) btn.classList.add('active');
+  if (container) container.classList.add('targeting-meteor');
+  toast('☄️ Modo Catástrofe: Clique no mapa para lançar o meteoro (ou clique no botão novamente para queda aleatória)!', 4000);
+}
+
+function triggerMeteorImpactAt(x, y) {
+  const btn = document.getElementById('btn-trigger-meteor');
+  const container = document.querySelector('.sim-canvas-area');
+
+  window.meteorTargetingActive = false;
+  if (btn) btn.classList.remove('active');
+  if (container) container.classList.remove('targeting-meteor');
+
+  if (typeof engine !== 'undefined') {
+    engine.triggerMeteor(x, y);
+    if (!engine.isRunning) engine.render();
   }
 }

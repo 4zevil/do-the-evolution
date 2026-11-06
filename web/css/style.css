@@ -1596,3 +1596,24 @@ body {
   color: var(--accent);
   font-weight: 700;
 }
+
+/* ── BOTÃO DE CATÁSTROFE (METEORO) & MIRA ── */
+#btn-trigger-meteor {
+  transition: all 0.2s ease;
+  font-weight: 600;
+}
+#btn-trigger-meteor.active {
+  background: #da3633 !important;
+  color: #ffffff !important;
+  border-color: #f85149 !important;
+  box-shadow: 0 0 10px rgba(248, 81, 73, 0.6);
+  animation: pulseMeteorBtn 0.9s infinite alternate;
+}
+@keyframes pulseMeteorBtn {
+  from { transform: scale(1); box-shadow: 0 0 6px rgba(248, 81, 73, 0.5); }
+  to { transform: scale(1.05); box-shadow: 0 0 14px rgba(248, 81, 73, 0.95); }
+}
+.sim-canvas-area.targeting-meteor,
+.sim-canvas-area.targeting-meteor #sim-canvas {
+  cursor: crosshair !important;
+}
