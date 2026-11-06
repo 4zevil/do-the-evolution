@@ -1,12 +1,7 @@
 // ====================================================
-//  SIMULATION.JS — Motor da Simulação Ecológica 2D
-//  Com Regulação Populacional Natural por Capacidade de Suporte (K):
-//  - 1. Estresse de Aglomeração Territorial (Cortisol por densidade)
-//  - 2. Sobrepastoreio (Overgrazing) e Morte Definitiva da Raiz
-//  - 3. Gestação Contínua com Aborto Espontâneo por Inanição
-//  - 4. Vulnerabilidade e Mortalidade Juvenil Natural
-//  - 5. Epidemias e Parasitismo por Aglomeração
-//  - Árvore Filogenética, Especiação e Telemetria Histórica
+//  SIMULATION.JS — Motor da Simulação Ecológica 2D em POO
+//  Arquitetura Orientada a Objetos com Encapsulamento,
+//  Herança e Despacho Polimórfico de Entidades
 // ====================================================
 
 const SEASONS = [
@@ -16,7 +11,6 @@ const SEASONS = [
   { name: 'Inverno',   icon: '❄️', temp: -0.7, rain: 0.5, sunlight: 0.6, thermalCost: 1.35 }
 ];
 
-// Trava extrema apenas para segurança da memória do navegador (evita congelamento da aba)
 const HARD_CRASH_FAILSAFE = 600;
 
 const SPECIES_PALETTE = [
@@ -25,96 +19,1177 @@ const SPECIES_PALETTE = [
   '#2ea043', '#388bfd', '#bc8cff', '#ff7b72', '#238636'
 ];
 
-function getGeneticDistance(genesA, genesB) {
-  const keys = ['size', 'speed', 'perception', 'gestation', 'offspringCount', 'aggression', 'health'];
-  let sumSq = 0;
-  keys.forEach(k => {
-    const diff = (genesA[k] || 0.5) - (genesB[k] || 0.5);
-    sumSq += diff * diff;
-  });
+// ════════════════════════════════════════════════════
+// 1. VALUE OBJECTS & GENÉTICA (POO)
+// ════════════════════════════════════════════════════
 
-  const dietDiffMeat = Math.abs((genesA.diet?.meat || 0) - (genesB.diet?.meat || 0));
-  const dietDiffPlant = Math.abs((genesA.diet?.plant || 0) - (genesB.diet?.plant || 0));
-  const dietDiffCarcass = Math.abs((genesA.diet?.carcass || 0) - (genesB.diet?.carcass || 0));
-  sumSq += (dietDiffMeat * dietDiffMeat + dietDiffPlant * dietDiffPlant + dietDiffCarcass * dietDiffCarcass);
-
-  return Math.sqrt(sumSq / (keys.length + 3));
-}
-
-function evaluateSpeciation(childGenes, founderGenes) {
-  const traits = [
-    { key: 'size', name: 'Porte', threshold: 0.28 },
-    { key: 'speed', name: 'Velocidade', threshold: 0.28 },
-    { key: 'perception', name: 'Visão', threshold: 0.30 },
-    { key: 'thermal', name: 'Clima', threshold: 0.35 }
-  ];
-
-  const dietMeatDiff = Math.abs((childGenes.diet?.meat || 0) - (founderGenes.diet?.meat || 0));
-  if (dietMeatDiff >= 0.28) {
-    const desc = childGenes.diet.meat > founderGenes.diet.meat ? 'Predador' : 'Herbívoro';
-    return { diverged: true, traitName: 'Dieta', desc: desc };
+/**
+ * Value Object para coordenadas e vetores bidimensionais.
+ */
+class Vector2D {
+  constructor(x = 0, y = 0) {
+    this.x = x;
+    this.y = y;
   }
 
-  for (let t of traits) {
-    const diff = Math.abs((childGenes[t.key] || 0) - (founderGenes[t.key] || 0));
-    if (diff >= t.threshold) {
-      let desc = childGenes[t.key] > founderGenes[t.key] ? 'Superior' : 'Reduzido';
-      if (t.key === 'size') desc = childGenes[t.key] > founderGenes[t.key] ? 'Gigante' : 'Pigmeu';
-      if (t.key === 'thermal') desc = childGenes[t.key] > founderGenes[t.key] ? 'Tropical' : 'Polar';
-      if (t.key === 'speed') desc = childGenes[t.key] > founderGenes[t.key] ? 'Veloz' : 'Robusto';
-      return { diverged: true, traitName: t.name, desc: desc };
+  set(x, y) { this.x = x; this.y = y; return this; }
+  add(v) { this.x += v.x; this.y += v.y; return this; }
+  sub(v) { this.x -= v.x; this.y -= v.y; return this; }
+  mult(n) { this.x *= n; this.y *= n; return this; }
+  div(n) { if (n !== 0) { this.x /= n; this.y /= n; } return this; }
+  mag() { return Math.hypot(this.x, this.y); }
+  dist(v) { return Math.hypot(this.x - v.x, this.y - v.y); }
+  heading() { return Math.atan2(this.y, this.x); }
+  normalize() {
+    const m = this.mag();
+    if (m > 0) this.div(m);
+    return this;
+  }
+  clone() { return new Vector2D(this.x, this.y); }
+}
+
+/**
+ * Genoma quantitativo de organismos vivos.
+ * Encapsula cálculo de distância genética, mutação e especiação.
+ */
+class Genome {
+  constructor(genes = {}) {
+    // Genes animais
+    this.size = genes.size ?? 0.5;
+    this.speed = genes.speed ?? 0.5;
+    this.perception = genes.perception ?? 0.5;
+    this.gestation = genes.gestation ?? 0.4;
+    this.offspringCount = genes.offspringCount ?? 0.4;
+    this.aggression = genes.aggression ?? 0.3;
+    this.health = genes.health ?? 0.5;
+    this.thermal = genes.thermal ?? 0.0;
+    this.aquatic = genes.aquatic ?? 0.15;
+    this.colorHue = genes.colorHue ?? 120;
+
+    // Genes vegetais
+    this.height = genes.height ?? 0.5;
+    this.defense = genes.defense ?? 0.3;
+    this.rootEfficiency = genes.rootEfficiency ?? 0.5;
+    this.growthSpeed = genes.growthSpeed ?? 0.5;
+    this.fruitAttraction = genes.fruitAttraction ?? 0.4;
+    this.parasiteResistance = genes.parasiteResistance ?? 0.4;
+
+    // Dieta trófica
+    if (genes.diet) {
+      this.diet = {
+        meat: genes.diet.meat ?? 0.05,
+        plant: genes.diet.plant ?? 0.85,
+        carcass: genes.diet.carcass ?? 0.10
+      };
+    } else {
+      this.diet = { meat: 0.05, plant: 0.85, carcass: 0.10 };
     }
   }
 
-  const dist = getGeneticDistance(childGenes, founderGenes);
-  if (dist >= 0.28) {
-    const desc = (childGenes.diet?.meat || 0) > 0.5 ? 'Predador' : 'Herbívoro';
-    return { diverged: true, traitName: 'Genoma Geral', desc: desc };
+  static getGeneticDistance(genesA, genesB) {
+    const keys = ['size', 'speed', 'perception', 'gestation', 'offspringCount', 'aggression', 'health'];
+    let sumSq = 0;
+    keys.forEach(k => {
+      const diff = (genesA[k] || 0.5) - (genesB[k] || 0.5);
+      sumSq += diff * diff;
+    });
+
+    const dietDiffMeat = Math.abs((genesA.diet?.meat || 0) - (genesB.diet?.meat || 0));
+    const dietDiffPlant = Math.abs((genesA.diet?.plant || 0) - (genesB.diet?.plant || 0));
+    const dietDiffCarcass = Math.abs((genesA.diet?.carcass || 0) - (genesB.diet?.carcass || 0));
+    sumSq += (dietDiffMeat * dietDiffMeat + dietDiffPlant * dietDiffPlant + dietDiffCarcass * dietDiffCarcass);
+
+    return Math.sqrt(sumSq / (keys.length + 3));
   }
 
-  return { diverged: false };
+  static evaluateAnimalSpeciation(childGenes, founderGenes) {
+    const traits = [
+      { key: 'size', name: 'Porte', threshold: 0.28 },
+      { key: 'speed', name: 'Velocidade', threshold: 0.28 },
+      { key: 'perception', name: 'Visão', threshold: 0.30 },
+      { key: 'thermal', name: 'Clima', threshold: 0.35 }
+    ];
+
+    const dietMeatDiff = Math.abs((childGenes.diet?.meat || 0) - (founderGenes.diet?.meat || 0));
+    if (dietMeatDiff >= 0.28) {
+      const desc = childGenes.diet.meat > founderGenes.diet.meat ? 'Predador' : 'Herbívoro';
+      return { diverged: true, traitName: 'Dieta', desc: desc };
+    }
+
+    for (let t of traits) {
+      const diff = Math.abs((childGenes[t.key] || 0) - (founderGenes[t.key] || 0));
+      if (diff >= t.threshold) {
+        let desc = childGenes[t.key] > founderGenes[t.key] ? 'Superior' : 'Reduzido';
+        if (t.key === 'size') desc = childGenes[t.key] > founderGenes[t.key] ? 'Gigante' : 'Pigmeu';
+        if (t.key === 'thermal') desc = childGenes[t.key] > founderGenes[t.key] ? 'Tropical' : 'Polar';
+        if (t.key === 'speed') desc = childGenes[t.key] > founderGenes[t.key] ? 'Veloz' : 'Robusto';
+        return { diverged: true, traitName: t.name, desc: desc };
+      }
+    }
+
+    const dist = Genome.getGeneticDistance(childGenes, founderGenes);
+    if (dist >= 0.28) {
+      const desc = (childGenes.diet?.meat || 0) > 0.5 ? 'Predador' : 'Herbívoro';
+      return { diverged: true, traitName: 'Genoma Geral', desc: desc };
+    }
+
+    return { diverged: false };
+  }
+
+  static evaluatePlantSpeciation(childGenes, founderGenes) {
+    const traits = [
+      { key: 'defense', name: 'Defesa', threshold: 0.28, high: 'Espinhosa', low: 'Indefesa' },
+      { key: 'height', name: 'Porte', threshold: 0.28, high: 'Gigante', low: 'Rasteira' },
+      { key: 'rootEfficiency', name: 'Raiz', threshold: 0.30, high: 'Árida', low: 'Aquática' },
+      { key: 'growthSpeed', name: 'Ciclo', threshold: 0.28, high: 'Pioneira', low: 'Tardia' },
+      { key: 'thermal', name: 'Clima', threshold: 0.32, high: 'Tropical', low: 'Boreal' }
+    ];
+
+    for (let t of traits) {
+      const diff = (childGenes[t.key] || 0) - (founderGenes[t.key] || 0);
+      if (Math.abs(diff) >= t.threshold) {
+        const desc = diff > 0 ? t.high : t.low;
+        return { diverged: true, traitName: t.name, desc: desc };
+      }
+    }
+    return { diverged: false };
+  }
+
+  static mutateAndNormalizeDiet(parentDiet) {
+    const newDiet = {
+      meat: Math.max(0.01, (parentDiet.meat ?? 0.33) + (Math.random() * 0.14 - 0.07)),
+      plant: Math.max(0.01, (parentDiet.plant ?? 0.33) + (Math.random() * 0.14 - 0.07)),
+      carcass: Math.max(0.01, (parentDiet.carcass ?? 0.33) + (Math.random() * 0.14 - 0.07))
+    };
+
+    const total = newDiet.meat + newDiet.plant + newDiet.carcass;
+    return {
+      meat: parseFloat((newDiet.meat / total).toFixed(2)),
+      plant: parseFloat((newDiet.plant / total).toFixed(2)),
+      carcass: parseFloat((newDiet.carcass / total).toFixed(2))
+    };
+  }
+
+  clone() {
+    return new Genome(JSON.parse(JSON.stringify(this)));
+  }
 }
 
-function evaluatePlantSpeciation(childGenes, founderGenes) {
-  const traits = [
-    { key: 'defense', name: 'Defesa', threshold: 0.28, high: 'Espinhosa', low: 'Indefesa' },
-    { key: 'height', name: 'Porte', threshold: 0.28, high: 'Gigante', low: 'Rasteira' },
-    { key: 'rootEfficiency', name: 'Raiz', threshold: 0.30, high: 'Árida', low: 'Aquática' },
-    { key: 'growthSpeed', name: 'Ciclo', threshold: 0.28, high: 'Pioneira', low: 'Tardia' },
-    { key: 'thermal', name: 'Clima', threshold: 0.32, high: 'Tropical', low: 'Boreal' }
-  ];
+// Funções globais legadas para retrocompatibilidade
+function getGeneticDistance(a, b) { return Genome.getGeneticDistance(a, b); }
+function evaluateSpeciation(c, f) { return Genome.evaluateAnimalSpeciation(c, f); }
+function evaluatePlantSpeciation(c, f) { return Genome.evaluatePlantSpeciation(c, f); }
+function mutateAndNormalizeDiet(d) { return Genome.mutateAndNormalizeDiet(d); }
 
-  for (let t of traits) {
-    const diff = (childGenes[t.key] || 0) - (founderGenes[t.key] || 0);
-    if (Math.abs(diff) >= t.threshold) {
-      const desc = diff > 0 ? t.high : t.low;
-      return { diverged: true, traitName: t.name, desc: desc };
+// ════════════════════════════════════════════════════
+// 2. MODELO DE GRADE E SOLO (POO)
+// ════════════════════════════════════════════════════
+
+class GridCell {
+  constructor(r, c, size = 26, biome = 'fertile') {
+    this.r = r;
+    this.c = c;
+    this.size = size;
+    this.x = (c + 0.5) * size;
+    this.y = (r + 0.5) * size;
+    this.biome = biome;
+    this.elevation = 0.5;
+    this.moisture = 0.5;
+    this.maxSoilNitrogen = 100;
+    this.soilNitrogen = 30;
+    this.organicBiomass = 0.0;
+    this.plant = null;
+    this.carcass = null;
+    this.cachedColor = null;
+  }
+
+  regenerate(curSeason) {
+    if (this.biome !== 'water') {
+      this.moisture = Math.min(1.0, Math.max(0.12, this.moisture + 0.02 * curSeason.rain - 0.005));
+      if (this.organicBiomass > 0.05) {
+        const minRate = this.organicBiomass * 0.04 * this.moisture;
+        this.organicBiomass -= minRate;
+        this.soilNitrogen = Math.min(this.maxSoilNitrogen, this.soilNitrogen + minRate * 0.9);
+      } else if (this.soilNitrogen < this.maxSoilNitrogen) {
+        this.soilNitrogen = Math.min(this.maxSoilNitrogen, this.soilNitrogen + 0.12 * curSeason.rain);
+      }
     }
   }
-  return { diverged: false };
+
+  consumeNitrogen(amount) {
+    this.soilNitrogen = Math.max(0, this.soilNitrogen - amount);
+  }
+
+  addOrganicBiomass(amount) {
+    this.organicBiomass = Math.min(80.0, this.organicBiomass + amount);
+  }
 }
 
-function mutateAndNormalizeDiet(parentDiet) {
-  const newDiet = {
-    meat: Math.max(0.01, (parentDiet.meat ?? 0.33) + (Math.random() * 0.14 - 0.07)),
-    plant: Math.max(0.01, (parentDiet.plant ?? 0.33) + (Math.random() * 0.14 - 0.07)),
-    carcass: Math.max(0.01, (parentDiet.carcass ?? 0.33) + (Math.random() * 0.14 - 0.07))
-  };
+// ════════════════════════════════════════════════════
+// 3. HIERARQUIA DE ENTIDADES E ORGANISMOS (POO)
+// ════════════════════════════════════════════════════
 
-  const total = newDiet.meat + newDiet.plant + newDiet.carcass;
-  return {
-    meat: parseFloat((newDiet.meat / total).toFixed(2)),
-    plant: parseFloat((newDiet.plant / total).toFixed(2)),
-    carcass: parseFloat((newDiet.carcass / total).toFixed(2))
-  };
+/**
+ * Entidade base no plano 2D.
+ */
+class Entity {
+  constructor(id, x, y) {
+    this.id = id || ('ent_' + Math.random().toString(36).substr(2, 9));
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+    this.alive = true;
+  }
+
+  distanceTo(other) {
+    return Math.hypot(this.x - other.x, this.y - other.y);
+  }
+
+  clampToBounds(margin, maxX, maxY) {
+    if (this.x < margin) { this.x = margin; this.vx *= -1; }
+    if (this.x > maxX)   { this.x = maxX;   this.vx *= -1; }
+    if (this.y < margin) { this.y = margin; this.vy *= -1; }
+    if (this.y > maxY)   { this.y = maxY;   this.vy *= -1; }
+  }
 }
+
+/**
+ * Carcaça física de animal morto em decomposição e mineralização.
+ */
+class Carcass extends Entity {
+  constructor(id, speciesName, x, y, r, c, remainingEnergy = 35.0, genes = null) {
+    super(id, x, y);
+    this.speciesName = speciesName || 'Carcaça';
+    this.r = r;
+    this.c = c;
+    this.remainingEnergy = remainingEnergy;
+    this.decayTimer = 0;
+    this.maxDecayTimer = 250;
+    this.genes = genes;
+  }
+
+  tick(cell) {
+    this.decayTimer++;
+    const decayLoss = 0.20;
+    this.remainingEnergy -= decayLoss;
+
+    if (cell) {
+      cell.organicBiomass = Math.min(80.0, cell.organicBiomass + decayLoss * 0.85);
+    }
+
+    if (this.remainingEnergy <= 0 || this.decayTimer > this.maxDecayTimer) {
+      this.alive = false;
+      if (cell && cell.carcass === this) {
+        cell.carcass = null;
+      }
+    }
+  }
+
+  consumeBite(amount) {
+    const bite = Math.min(this.remainingEnergy, amount);
+    this.remainingEnergy -= bite;
+    if (this.remainingEnergy <= 0) {
+      this.alive = false;
+    }
+    return bite;
+  }
+}
+
+/**
+ * Organismo vivo provido de genoma, energia, taxa metabólica e ciclo de vida.
+ */
+class Organism extends Entity {
+  constructor(id, name, speciesName, x, y, initialEnergy, maxEnergy, genes = {}, customImages = {}) {
+    super(id, x, y);
+    this.name = name || 'Organismo';
+    this.speciesName = speciesName || this.name;
+    this.genes = genes instanceof Genome ? genes : new Genome(genes);
+    this.energy = initialEnergy;
+    this.maxEnergy = maxEnergy;
+    this.age = 0;
+    this.customImages = { ...(customImages || {}) };
+  }
+
+  consumeEnergy(amount) {
+    this.energy = Math.max(0, this.energy - amount);
+    if (this.energy <= 0) {
+      this.alive = false;
+    }
+  }
+
+  gainEnergy(amount) {
+    this.energy = Math.min(this.maxEnergy, this.energy + amount);
+  }
+
+  ageOneTick() {
+    this.age++;
+  }
+
+  isDead() {
+    return !this.alive || this.energy <= 0;
+  }
+}
+
+/**
+ * Entidade Vegetal fundamentada na Lei de Liebig e partição de biomassa.
+ */
+class Plant extends Organism {
+  constructor(id, name, r, c, cellSize, genes = {}, customImages = {}) {
+    const px = (c + 0.5) * cellSize;
+    const py = (r + 0.5) * cellSize;
+    super(id, name, name, px, py, 40.0, 45.0, genes, customImages);
+    this.r = r;
+    this.c = c;
+    this.growth = 0.35;
+    this.hasFruit = false;
+    this.fruitCount = 0;
+  }
+
+  getMaintenanceCost() {
+    const g = this.genes;
+    return 0.02 + ((g.height || 0.5) * 0.02) + ((g.defense || 0.3) * 0.015);
+  }
+
+  tick(curSeason, cell, plantMetrics, engine) {
+    this.ageOneTick();
+    if (!cell) {
+      this.alive = false;
+      return;
+    }
+
+    const g = this.genes;
+    const maintenanceCost = this.getMaintenanceCost();
+
+    const tempDiff = Math.abs((g.thermal || 0.0) - curSeason.temp);
+    const thermalPlantFactor = tempDiff > 0.4 ? 1.0 + (tempDiff - 0.4) * 0.6 : 1.0;
+
+    const lightFactor = (curSeason.sunlight * 1.0) / (0.4 + curSeason.sunlight);
+    const nitrogenFactor = cell.soilNitrogen / (10.0 + cell.soilNitrogen);
+    const waterFactor = Math.min(1.0, cell.moisture * (0.7 + (g.rootEfficiency || 0.5) * 0.6));
+    const liebig = Math.min(lightFactor, nitrogenFactor, waterFactor) / thermalPlantFactor;
+
+    // Longevidade genética
+    const baseLifespan = 320 + ((g.height || 0.5) * 320) + ((g.defense || 0.3) * 180) - ((g.growthSpeed || 0.5) * 140);
+    const plantMaxAge = Math.max(180, Math.round(baseLifespan));
+
+    if (cell.soilNitrogen >= maintenanceCost) {
+      if (plantMetrics) plantMetrics.growthUpdates++;
+      cell.soilNitrogen -= maintenanceCost;
+      const leafAreaFactor = Math.max(0.20, this.growth);
+      const growthDelta = 0.016 * leafAreaFactor * (0.5 + (g.growthSpeed || 0.5) * 0.8) * liebig;
+      this.growth = Math.min(1.0, this.growth + growthDelta);
+
+      if (liebig > 0.35 && this.energy < 45.0) {
+        this.gainEnergy(0.12 * liebig);
+      }
+
+      if (this.growth >= 0.68) {
+        this.hasFruit = true;
+        this.fruitCount = Math.round(1 + (g.fruitAttraction || 0.4) * 4);
+      }
+    } else {
+      if (plantMetrics) plantMetrics.growthBlocked++;
+      this.consumeEnergy(0.32 * (1.0 + (g.height || 0.5) * 0.4));
+    }
+
+    if (liebig < 0.20) {
+      this.consumeEnergy(0.14);
+    }
+
+    if (this.age > plantMaxAge * 0.85) {
+      this.consumeEnergy(0.18);
+    }
+
+    // Mortalidade por senescência ou inanição de nutrientes
+    if (this.age >= plantMaxAge || this.energy <= 0) {
+      if (plantMetrics) {
+        if (this.energy <= 0) plantMetrics.nutrientDeaths++;
+        else plantMetrics.ageDeaths++;
+      }
+      cell.addOrganicBiomass(this.growth * 12.0);
+      cell.soilNitrogen = Math.min(60.0, cell.soilNitrogen + 2.0);
+      if (cell.plant === this) cell.plant = null;
+      this.alive = false;
+      return;
+    }
+
+    // Dispersão e reprodução sexuada por polinização cruzada
+    const reproThreshold = 0.015 * (g.growthSpeed || 0.5);
+    if (this.hasFruit && Math.random() < reproThreshold && engine && engine.plants.length < engine.gridCols * engine.gridRows * 0.70) {
+      this.disperseSeed(engine, curSeason);
+    }
+  }
+
+  disperseSeed(engine, curSeason) {
+    const g = this.genes;
+    const windReach = Math.max(1, Math.round(1 + (g.height || 0.5) * 4));
+    const dr = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
+    const dc = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
+    const nr = this.r + dr, nc = this.c + dc;
+
+    if (engine.grid[nr]?.[nc] && engine.grid[nr][nc].biome !== 'water' && !engine.grid[nr][nc].plant) {
+      let partnerGenes = g;
+      const searchRadius = 3;
+      for (let pr = Math.max(0, this.r - searchRadius); pr <= Math.min(engine.gridRows - 1, this.r + searchRadius); pr++) {
+        for (let pc = Math.max(0, this.c - searchRadius); pc <= Math.min(engine.gridCols - 1, this.c + searchRadius); pc++) {
+          const other = engine.grid[pr]?.[pc]?.plant;
+          if (other && other !== this && other.hasFruit) {
+            partnerGenes = other.genes || g;
+            break;
+          }
+        }
+        if (partnerGenes !== g) break;
+      }
+
+      const mutMul = engine.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
+      const childGenes = {};
+      const allGeneKeys = ['height', 'rootEfficiency', 'growthSpeed', 'defense', 'fruitAttraction', 'parasiteResistance', 'thermal', 'colorHue'];
+
+      allGeneKeys.forEach(k => {
+        const geneA = g[k] ?? (k === 'colorHue' ? 110 : (k === 'thermal' ? 0.0 : 0.5));
+        const geneB = partnerGenes[k] ?? geneA;
+        const avg = (geneA + geneB) / 2;
+
+        if (k === 'colorHue') {
+          const hueMut = (Math.random() * 26 - 13) * mutMul;
+          childGenes[k] = Math.round((avg + hueMut + 360) % 360);
+        } else if (k === 'thermal') {
+          const tMut = (Math.random() * 0.12 - 0.06) * mutMul;
+          childGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, avg + tMut)).toFixed(2));
+        } else {
+          const gMut = (Math.random() * 0.12 - 0.06) * mutMul;
+          childGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, avg + gMut)).toFixed(2));
+        }
+      });
+
+      const baseName = this.name;
+      const speciesData = engine.speciesRegistry[baseName] || {};
+      const founderGenes = speciesData.founderGenes || g;
+      const rootName = speciesData.rootName || baseName.replace(/\s*(Espinhosa|Indefesa|Gigante|Rasteira|Árida|Aquática|Pioneira|Tardia|Tropical|Boreal)/g, '').trim();
+
+      const speciation = Genome.evaluatePlantSpeciation(childGenes, founderGenes);
+      let childSpeciesName = baseName;
+
+      if (speciation.diverged) {
+        childSpeciesName = rootName + ' ' + speciation.desc;
+        const isNew = engine.registerSpecies(
+          childSpeciesName,
+          'plant',
+          childGenes,
+          baseName,
+          rootName,
+          speciation.traitName + ' ' + speciation.desc
+        );
+        if (isNew && typeof toast === 'function') {
+          toast('🌿 Nova Linhagem Vegetal: "' + childSpeciesName + '" emergiu por seleção de ' + speciation.traitName + '!');
+        }
+      }
+
+      const clonePlant = new Plant(
+        'plant_' + Math.random().toString(36).substr(2, 9),
+        childSpeciesName,
+        nr, nc,
+        engine.cellSize,
+        childGenes,
+        this.customImages
+      );
+      clonePlant.growth = 0.14;
+      clonePlant.energy = 28.0;
+
+      engine.grid[nr][nc].plant = clonePlant;
+      engine.plants.push(clonePlant);
+      if (engine.plantMetrics) engine.plantMetrics.reproduced++;
+    }
+  }
+
+  beEaten(biteAmount) {
+    const actualBite = Math.min(this.growth, biteAmount);
+    this.growth = Math.max(0, this.growth - actualBite);
+    this.energy -= actualBite * 16.0;
+    this.hasFruit = false;
+    return actualBite;
+  }
+}
+
+/**
+ * Organismo Animal regido pela Lei de Kleiber, termorregulação e IA de caça/fuga.
+ */
+class Animal extends Organism {
+  constructor(id, name, speciesName, x, y, genes = {}, customImages = {}) {
+    const genome = genes instanceof Genome ? genes : new Genome(genes);
+    const meatRatio = genome.diet?.meat || 0.0;
+    const initialEnergy = 90.0 + Math.random() * 10;
+    const maxEnergy = 100.0 + meatRatio * 80.0;
+
+    super(id, name, speciesName, x, y, initialEnergy, maxEnergy, genome, customImages);
+
+    this.vx = (Math.random() - 0.5) * 1.5;
+    this.vy = (Math.random() - 0.5) * 1.5;
+
+    this.state = 'wandering';
+    this.stateLabel = 'Forrageando';
+    this.mateCooldown = 30;
+    this.attackCooldown = 0;
+    this.isDiseased = false;
+    this.diseaseTimer = 0;
+    this.isPregnant = false;
+    this.gestationTicks = 0;
+    this.pregnantGenes = null;
+    this.pregnantSpeciesName = null;
+    this.pregnantClutchSize = 1;
+    this.carriedSeed = null;
+    this.fleeTicks = 0;
+    this.carcassEnergy = null;
+  }
+
+  calculateMetabolicCost(curSeason, inWater) {
+    const g = this.genes;
+    const curSpeed = Math.hypot(this.vx || 0, this.vy || 0);
+    const massKg = 5.0 + (g.size || 0.5) * 70.0;
+    const basalMetabolism = 0.06 * Math.pow(massKg / 40.0, 0.75);
+    const locomotionCost = 0.04 * Math.pow(curSpeed / 2.0, 1.5);
+
+    const meatRatio = g.diet?.meat || 0.0;
+    this.maxEnergy = 100.0 + meatRatio * 80.0;
+    const fastingEfficiency = 1.0 - meatRatio * 0.45;
+
+    const tempDiff = Math.abs((g.thermal || 0.0) - curSeason.temp);
+    const thermalFactor = 1.0 + (tempDiff > 0.4 ? 0.3 : 0.0) * curSeason.thermalCost;
+
+    let totalCost = (basalMetabolism * fastingEfficiency + locomotionCost) * thermalFactor;
+
+    const aquatic = g.aquatic ?? 0.15;
+    if (inWater) {
+      if (aquatic < 0.35) {
+        totalCost += (0.35 - aquatic) * 0.30;
+        this.vx *= 0.65;
+        this.vy *= 0.65;
+        this.stateLabel = 'Nadando com Esforço!';
+      } else {
+        totalCost *= 0.80;
+      }
+    } else {
+      if (aquatic > 0.70) {
+        totalCost += (aquatic - 0.70) * 0.25;
+        this.vx *= 0.75;
+        this.vy *= 0.75;
+        this.stateLabel = 'Rastejando em Terra!';
+      }
+    }
+
+    if (this.isDiseased) {
+      this.diseaseTimer--;
+      totalCost += 0.12;
+      if (this.diseaseTimer <= 0) this.isDiseased = false;
+    }
+
+    if (this.isPregnant) {
+      this.gestationTicks--;
+      totalCost += 0.08;
+    }
+
+    if (meatRatio > 0.45 && this.state !== 'hunting' && this.state !== 'fleeing') {
+      totalCost *= 0.72;
+    }
+
+    return totalCost;
+  }
+
+  tick(curSeason, engine, newOffspring, deadAnimals) {
+    this.ageOneTick();
+    if (this.mateCooldown > 0) this.mateCooldown--;
+    if (this.attackCooldown > 0) this.attackCooldown--;
+
+    const curR = Math.max(0, Math.min(engine.gridRows - 1, Math.floor(this.y / engine.cellSize)));
+    const curC = Math.max(0, Math.min(engine.gridCols - 1, Math.floor(this.x / engine.cellSize)));
+    const inWater = engine.grid[curR]?.[curC]?.biome === 'water';
+
+    const cost = this.calculateMetabolicCost(curSeason, inWater);
+
+    // Gestação, abortos e partos
+    if (this.isPregnant) {
+      if (this.energy < 22.0) {
+        this.isPregnant = false;
+        this.pregnantGenes = null;
+        this.stateLabel = '⚠️ Aborto por Inanição';
+        if (typeof toast === 'function' && Math.random() < 0.18) {
+          toast(`⚠️ ${this.name} sofreu aborto espontâneo por falta de comida!`);
+        }
+      } else if (this.gestationTicks <= 0) {
+        this.isPregnant = false;
+        const clutch = this.pregnantClutchSize || 1;
+        const babyGenes = this.pregnantGenes || this.genes;
+        const babySpeed = (0.5 + (babyGenes.speed || 0.5) * 1.5);
+
+        for (let b = 0; b < clutch; b++) {
+          const baby = new Animal(
+            'anim_' + Math.random().toString(36).substr(2, 9),
+            this.pregnantSpeciesName || this.speciesName,
+            this.pregnantSpeciesName || this.speciesName,
+            Math.max(10, Math.min((engine.gridCols * engine.cellSize) - 10, this.x + (Math.random() * 14 - 7))),
+            Math.max(10, Math.min((engine.gridRows * engine.cellSize) - 10, this.y + (Math.random() * 14 - 7))),
+            babyGenes,
+            this.customImages
+          );
+          baby.vx = (Math.random() - 0.5) * babySpeed;
+          baby.vy = (Math.random() - 0.5) * babySpeed;
+          baby.energy = (babyGenes.diet?.meat || 0) > 0.45 ? 58.0 : 24.0;
+          baby.stateLabel = 'Recém-nascido (Frágil)';
+          baby.mateCooldown = 60;
+          newOffspring.push(baby);
+        }
+        this.pregnantGenes = null;
+        this.stateLabel = 'Deu à luz!';
+      }
+    }
+
+    this.consumeEnergy(cost);
+
+    const g = this.genes;
+    const maxLifespan = (g.diet?.meat || 0) > 0.45 ? (950 + (g.size || 0.5) * 300) : (700 + (g.size || 0.5) * 150);
+
+    if (this.energy <= 0 || this.age > maxLifespan) {
+      if (engine.animalMetrics) {
+        if (this.energy <= 0) engine.animalMetrics.energyDeaths++;
+        else engine.animalMetrics.ageDeaths++;
+
+        if (this.age < 50) engine.animalMetrics.juvenileDeaths++;
+        else engine.animalMetrics.adultDeaths++;
+
+        if (this.isDiseased) engine.animalMetrics.sickDeaths++;
+        else engine.animalMetrics.healthyDeaths++;
+      }
+
+      this.alive = false;
+      deadAnimals.push(this);
+      return;
+    }
+
+    // Execução da IA e tomada de decisão
+    this.updateAI(engine, newOffspring);
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Dispersão zoocórica de sementes ingeridas
+    if (this.carriedSeed) {
+      this.carriedSeed.dropTimer--;
+      if (this.carriedSeed.dropTimer <= 0) {
+        const ar = Math.floor(this.y / engine.cellSize);
+        const ac = Math.floor(this.x / engine.cellSize);
+        const targetCell = engine.grid[ar]?.[ac];
+
+        if (targetCell && targetCell.biome !== 'water' && !targetCell.plant && engine.plants.length < engine.gridCols * engine.gridRows * 0.70) {
+          const baseName = this.carriedSeed.speciesName;
+          const speciesData = engine.speciesRegistry[baseName] || {};
+          const founderGenes = speciesData.founderGenes || this.carriedSeed.genes;
+          const rootName = speciesData.rootName || baseName.replace(/\s*(Espinhosa|Indefesa|Gigante|Rasteira|Árida|Aquática|Pioneira|Tardia|Tropical|Boreal)/g, '').trim();
+
+          const speciation = Genome.evaluatePlantSpeciation(this.carriedSeed.genes, founderGenes);
+          let childSpeciesName = baseName;
+
+          if (speciation.diverged) {
+            childSpeciesName = rootName + ' ' + speciation.desc;
+            const isNew = engine.registerSpecies(
+              childSpeciesName,
+              'plant',
+              this.carriedSeed.genes,
+              baseName,
+              rootName,
+              speciation.traitName + ' ' + speciation.desc
+            );
+            if (isNew && typeof toast === 'function') {
+              toast('🌿 Nova Linhagem Vegetal (Zoocoria): "' + childSpeciesName + '" germinou após dispersão animal!');
+            }
+          }
+
+          const seedPlant = new Plant(
+            'plant_' + Math.random().toString(36).substr(2, 9),
+            childSpeciesName,
+            ar, ac,
+            engine.cellSize,
+            this.carriedSeed.genes || {},
+            this.carriedSeed.customImages || {}
+          );
+          seedPlant.growth = 0.22;
+          seedPlant.energy = 40.0;
+          targetCell.plant = seedPlant;
+          targetCell.addOrganicBiomass(5.0);
+          engine.plants.push(seedPlant);
+          if (engine.plantMetrics) engine.plantMetrics.reproduced++;
+        }
+        this.carriedSeed = null;
+      }
+    }
+
+    const margin = 12;
+    const maxX = engine.gridCols * engine.cellSize - margin;
+    const maxY = engine.gridRows * engine.cellSize - margin;
+    this.clampToBounds(margin, maxX, maxY);
+  }
+
+  updateAI(engine, newOffspring) {
+    const g = this.genes;
+    const isCarnivore = (g.diet?.meat || 0) > 0.45;
+
+    const hungerRatio = Math.max(0, 1.0 - (this.energy / this.maxEnergy));
+    const hungerVisionBonus = isCarnivore ? (1.0 + hungerRatio * 0.5) : 1.0;
+    const viewDist = (45 + g.perception * 130) * (isCarnivore ? 1.4 : 1.0) * hungerVisionBonus;
+
+    const speedPenalty = this.isDiseased ? 0.65 : (this.isPregnant ? 0.82 : 1.0);
+    const curR = Math.max(0, Math.min(engine.gridRows - 1, Math.floor(this.y / engine.cellSize)));
+    const curC = Math.max(0, Math.min(engine.gridCols - 1, Math.floor(this.x / engine.cellSize)));
+    const inWater = engine.grid[curR]?.[curC]?.biome === 'water';
+    const aquatic = g.aquatic ?? 0.15;
+
+    const terrainSpeedFactor = inWater
+      ? (0.30 + aquatic * 0.90)
+      : (1.10 - aquatic * 0.55);
+
+    const maxSpeed = (0.7 + g.speed * 2.2) * speedPenalty * terrainSpeedFactor;
+
+    let targetX = null, targetY = null;
+    let desiredSpeed = maxSpeed * 0.45;
+    this.stateLabel = this.isDiseased
+      ? `☣️ Infectado (${this.diseaseTimer}t)`
+      : (this.isPregnant ? `🤰 Gestante (${this.gestationTicks}t)` : 'Forrageando');
+
+    // 1. Fuga de Predadores
+    if (!isCarnivore) {
+      const fleePerceptionBonus = (g.perception ?? 0.5) * 60.0 * (engine.equilibriumSettings?.fleePerceptionFactor ?? 1.0);
+      const maxFleeDist = Math.min(viewDist, 32.0 + fleePerceptionBonus);
+      let threat = null, minTDist = maxFleeDist;
+      engine.animals.forEach(other => {
+        if (other !== this && (other.genes.diet?.meat || 0) > 0.45 && other.genes.size > g.size * 1.1) {
+          const d = Math.hypot(other.x - this.x, other.y - this.y);
+          if (d < minTDist) { minTDist = d; threat = other; }
+        }
+      });
+
+      if (threat) {
+        if (engine.aiMetrics) engine.aiMetrics.fleeEvents++;
+        this.state = 'fleeing';
+        this.stateLabel = 'Fugindo de Predador!';
+        this.fleeTicks = (this.fleeTicks || 0) + 1;
+        const fatigue = this.fleeTicks > 40 ? Math.max(0.68, 1.0 - (this.fleeTicks - 40) * 0.012) : 1.0;
+        desiredSpeed = maxSpeed * fatigue;
+
+        const angle = Math.atan2(this.y - threat.y, this.x - threat.x);
+        this.vx = this.vx * 0.50 + Math.cos(angle) * desiredSpeed * 0.50;
+        this.vy = this.vy * 0.50 + Math.sin(angle) * desiredSpeed * 0.50;
+        return;
+      } else if (this.fleeTicks > 0) {
+        this.fleeTicks = Math.max(0, this.fleeTicks - 2);
+      }
+    }
+
+    // 2. Busca por Alimento
+    const hungerThreshold = isCarnivore ? (this.maxEnergy * (engine.equilibriumSettings?.predatorSatietyThreshold ?? 0.75)) : 85.0;
+    if (this.energy < hungerThreshold) {
+      // A. Necrofagia
+      const carcassHungerThreshold = isCarnivore ? 85.0 : 20.0;
+      if ((g.diet?.carcass || 0) > 0.08 && this.energy < carcassHungerThreshold) {
+        let bestCarcass = null, minCDist = Math.min(viewDist, 17.99);
+        engine.carcasses.forEach(c => {
+          if (!c || c.remainingEnergy <= 0) return;
+          const isConspecificCarcass = (c.speciesName === this.speciesName);
+          if (isConspecificCarcass && (!isCarnivore || this.energy >= 25.0)) return;
+
+          const d = Math.hypot(c.x - this.x, c.y - this.y);
+          if (d < minCDist) { minCDist = d; bestCarcass = c; }
+        });
+
+        if (bestCarcass) {
+          if (engine.aiMetrics) {
+            engine.aiMetrics.carcassTargets++;
+            engine.aiMetrics.carcassDistanceTotal += minCDist;
+            if (minCDist >= 18) engine.aiMetrics.carcassFarTargets++;
+            engine.aiMetrics.carcassMaxDistance = Math.max(engine.aiMetrics.carcassMaxDistance, minCDist);
+          }
+          targetX = bestCarcass.x;
+          targetY = bestCarcass.y;
+          desiredSpeed = maxSpeed * 0.7;
+          this.stateLabel = 'Comendo Carcaça';
+
+          if (minCDist < 18) {
+            if (engine.aiMetrics) {
+              engine.aiMetrics.carcassMeals++;
+              if (isCarnivore) engine.aiMetrics.carnivoreCarcassMeals++;
+              else engine.aiMetrics.herbivoreCarcassMeals++;
+            }
+            this.vx *= 0.1; this.vy *= 0.1;
+            const bite = bestCarcass.consumeBite(4.0);
+
+            if (bestCarcass.speciesName === this.speciesName) {
+              if (engine.aiMetrics) engine.aiMetrics.prionInfections++;
+              this.isDiseased = true;
+              this.diseaseTimer = Math.min(320, (this.diseaseTimer || 0) + 180);
+              this.stateLabel = '☣️ Canibalismo (Infectado por Príon!)';
+              if (typeof toast === 'function' && Math.random() < 0.25) {
+                toast(`☣️ ${this.name} contraiu Príon por necro-canibalismo!`);
+              }
+            }
+
+            this.gainEnergy(bite * 0.80);
+            return;
+          }
+        }
+      }
+
+      // B. Predação
+      const satietyThreshold = this.maxEnergy * (engine.equilibriumSettings?.predatorSatietyThreshold ?? 0.65);
+      const isCarnivoreAgent = (g.diet?.meat || 0) > 0.45;
+      const isHungryCarnivore = isCarnivoreAgent && !targetX && this.energy < satietyThreshold;
+
+      if (isHungryCarnivore) {
+        const sizeAdvantage = 1.15 + (g.aggression || 0.3) * 0.6;
+        let bestPrey = null, minPDist = viewDist;
+
+        engine.animals.forEach(other => {
+          if (other === this || !other.alive) return;
+          const isSameSpecies = (other.speciesName === this.speciesName);
+          const isOtherCarnivore = (other.genes.diet?.meat || 0) > 0.45;
+          if (isSameSpecies && this.energy >= 20.0) return;
+
+          const mySize = g.size || 0.5;
+          const preySize = other.genes.size || 0.5;
+          const isTargetVulnerable = (mySize * sizeAdvantage) > preySize;
+
+          if (isTargetVulnerable || this.energy < 25.0) {
+            const d = Math.hypot(other.x - this.x, other.y - this.y);
+            if (d < minPDist) {
+              minPDist = d;
+              bestPrey = other;
+            }
+          }
+        });
+
+        if (bestPrey) {
+          targetX = bestPrey.x;
+          targetY = bestPrey.y;
+          this.state = 'hunting';
+          this.stateLabel = 'Caçando Presa!';
+          desiredSpeed = maxSpeed * 1.05;
+
+          if (minPDist < 22 && this.attackCooldown === 0) {
+            this.attackCooldown = 15;
+            this.vx *= 0.2; this.vy *= 0.2;
+
+            const predAggro = (g.aggression || 0.3);
+            const preyHealth = (bestPrey.genes.health || 0.5);
+            const mySize = (g.size || 0.5);
+            const preySize = (bestPrey.genes.size || 0.5);
+
+            const damage = (28.0 + predAggro * 35.0) * (mySize / Math.max(0.2, preySize));
+            bestPrey.energy -= damage;
+
+            if (bestPrey.energy <= 0) {
+              bestPrey.alive = false;
+              if (engine.aiMetrics) {
+                if (bestPrey.speciesName === this.speciesName) engine.aiMetrics.cannibalAttacks++;
+                else engine.aiMetrics.otherSpeciesKills++;
+                if ((bestPrey.genes.diet?.meat || 0) > 0.45) engine.aiMetrics.carnivorePreyKills++;
+                else engine.aiMetrics.nonCarnivorePreyKills++;
+              }
+
+              const meatGain = (35.0 + preySize * 45.0) * 0.65;
+              this.gainEnergy(meatGain);
+              bestPrey.carcassEnergy = (35.0 + preySize * 45.0) * 0.35;
+              this.stateLabel = 'Abateu Presa!';
+              return;
+            } else {
+              this.stateLabel = 'Atacando Presa!';
+              bestPrey.vx += (this.vx * 1.5);
+              bestPrey.vy += (this.vy * 1.5);
+            }
+          }
+        }
+      }
+
+      // C. Herbivoria
+      if (!targetX && (g.diet?.plant || 0) > 0.15 && engine.plants.length > 0) {
+        let bestPlant = null, minPlDist = viewDist;
+        engine.plants.forEach(p => {
+          if (!p || p.growth < 0.15) return;
+          const d = Math.hypot(p.x - this.x, p.y - this.y);
+          if (d < minPlDist) { minPlDist = d; bestPlant = p; }
+        });
+
+        if (bestPlant) {
+          if (engine.aiMetrics) engine.aiMetrics.plantTargets = (engine.aiMetrics.plantTargets || 0) + 1;
+          targetX = bestPlant.x;
+          targetY = bestPlant.y;
+          desiredSpeed = maxSpeed * 0.65;
+          this.stateLabel = 'Pastando';
+
+          if (minPlDist < 16) {
+            if (engine.aiMetrics) {
+              engine.aiMetrics.plantApproaches++;
+              engine.aiMetrics.herbivoreMeals++;
+            }
+            this.vx *= 0.1; this.vy *= 0.1;
+
+            const plantDef = bestPlant.genes?.defense || 0;
+            const defenseFactor = Math.max(0.18, 1.0 - plantDef * 0.75);
+            const biteAmount = Math.min(bestPlant.growth * 0.65, 0.30) * defenseFactor;
+
+            if (plantDef > 0.40) {
+              const thornDamage = (plantDef - 0.40) * 14.0;
+              this.energy = Math.max(1.0, this.energy - thornDamage);
+              this.stateLabel = 'Repelido por Espinhos/Toxina!';
+            }
+
+            const calories = (Math.max(0.06, biteAmount) / 0.20) * (bestPlant.hasFruit ? 26.0 : 18.0);
+            this.gainEnergy(calories * 0.85);
+
+            bestPlant.energy -= biteAmount * 16.0;
+
+            if (bestPlant.hasFruit && Math.random() < (bestPlant.genes?.fruitAttraction || 0.4)) {
+              const mutMul = engine.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
+              const seedGenes = {};
+              const bg = bestPlant.genes || {};
+              const allGeneKeys = ['height', 'rootEfficiency', 'growthSpeed', 'defense', 'fruitAttraction', 'parasiteResistance', 'thermal', 'colorHue'];
+
+              allGeneKeys.forEach(k => {
+                const val = bg[k] ?? (k === 'colorHue' ? 110 : (k === 'thermal' ? 0.0 : 0.5));
+                if (k === 'colorHue') {
+                  seedGenes[k] = Math.round((val + (Math.random() * 26 - 13) * mutMul + 360) % 360);
+                } else if (k === 'thermal') {
+                  seedGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, val + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2));
+                } else {
+                  seedGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, val + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2));
+                }
+              });
+
+              this.carriedSeed = {
+                speciesName: bestPlant.name,
+                genes: seedGenes,
+                customImages: bestPlant.customImages,
+                dropTimer: Math.round(20 + Math.random() * 35)
+              };
+            }
+
+            const remainingGrowth = bestPlant.growth - biteAmount;
+            if (remainingGrowth < 0.08 || bestPlant.energy <= 4.0) {
+              const cell = engine.grid[bestPlant.r]?.[bestPlant.c];
+              if (cell && cell.plant === bestPlant) cell.plant = null;
+              if (engine.plantMetrics) engine.plantMetrics.grazingDeaths++;
+              if (cell) {
+                cell.addOrganicBiomass(Math.max(0, remainingGrowth) * 8.0);
+              }
+              const pIdx = engine.plants.indexOf(bestPlant);
+              if (pIdx !== -1) engine.plants.splice(pIdx, 1);
+              this.stateLabel = 'Arrancou raiz (Overgrazing)!';
+            } else {
+              bestPlant.growth = Math.max(0.06, remainingGrowth);
+              bestPlant.hasFruit = false;
+            }
+            return;
+          }
+        }
+      }
+    }
+
+    // 3. REPRODUÇÃO SEXUADA COM INÍCIO DE GESTAÇÃO
+    let totalCarnivores = 0;
+    let totalHerbivores = 0;
+    for (let i = 0; i < engine.animals.length; i++) {
+      if ((engine.animals[i].genes?.diet?.meat || 0) > 0.45) totalCarnivores++;
+      else totalHerbivores++;
+    }
+
+    const preyPerPredator = totalCarnivores > 0 ? (totalHerbivores / totalCarnivores) : 20.0;
+    let reproductionFactor;
+    if (isCarnivore) {
+      if (totalCarnivores < 4) {
+        reproductionFactor = totalHerbivores >= 8 ? 1.8 : 0.2;
+      } else if (preyPerPredator < 5.0 || totalCarnivores >= 40) {
+        reproductionFactor = 0.02;
+      } else if (preyPerPredator < 8.0) {
+        reproductionFactor = 0.25;
+      } else if (totalCarnivores < 18) {
+        reproductionFactor = 1.25;
+      } else {
+        reproductionFactor = 0.65;
+      }
+    } else {
+      reproductionFactor = totalHerbivores < 80
+        ? 1.85
+        : totalHerbivores < 260
+          ? 1.15
+          : totalHerbivores >= 400
+            ? 0.0
+            : 1.0 - ((totalHerbivores - 260) / 140);
+    }
+
+    const canStartReproduction = Math.random() < reproductionFactor;
+    const reproEnergyThreshold = isCarnivore 
+      ? (totalCarnivores < 20 ? 75.0 : 90.0)
+      : 68.0;
+
+    if (
+      canStartReproduction &&
+      this.energy > reproEnergyThreshold &&
+      this.age > 45 &&
+      this.mateCooldown === 0 &&
+      !this.isDiseased &&
+      !this.isPregnant
+    ) {
+      const mateSearchRadius = isCarnivore 
+        ? Math.max(viewDist * 4.0, 750) 
+        : (viewDist * 1.2);
+      let bestMate = null, minMDist = mateSearchRadius;
+
+      engine.animals.forEach(other => {
+        const otherIsCarnivore = (other.genes.diet?.meat || 0) > 0.45;
+        const otherReproThreshold = otherIsCarnivore 
+          ? (totalCarnivores < 20 ? 70.0 : 85.0) 
+          : 65.0;
+        if (other === this || other.energy <= otherReproThreshold * 0.85 || other.mateCooldown > 0 || other.isDiseased || other.isPregnant) return;
+
+        const genDist = Genome.getGeneticDistance(this.genes, other.genes);
+        let isCompatible = false;
+        if (other.speciesName === this.speciesName || genDist < 0.14) {
+          isCompatible = true;
+        }
+        if (genDist >= 0.28) {
+          isCompatible = false;
+        }
+
+        if (isCompatible) {
+          const d = Math.hypot(other.x - this.x, other.y - this.y);
+          if (d < minMDist) { minMDist = d; bestMate = other; }
+        }
+      });
+
+      if (bestMate) {
+        targetX = bestMate.x;
+        targetY = bestMate.y;
+        desiredSpeed = maxSpeed * 0.85;
+        this.stateLabel = 'Buscando Parceiro';
+
+        if (minMDist < 16) {
+          this.vx *= 0.1; this.vy *= 0.1;
+          const mateCost = isCarnivore ? 24.0 : 16.0;
+          this.energy -= mateCost;
+          bestMate.energy -= mateCost;
+
+          this.mateCooldown = 110;
+          bestMate.mateCooldown = 110;
+
+          const baseSpecies = this.speciesName;
+          const speciesData = engine.speciesRegistry[baseSpecies] || {};
+          const founderGenes = speciesData.founderGenes || g;
+          const rootName = speciesData.rootName || baseSpecies.replace(/\s*(Gigante|Pigmeu|Tropical|Polar|Veloz|Robusto|Predador|Herbívoro)/g, '').trim();
+
+          const childGenes = {};
+          const allGeneKeys = new Set([
+            ...Object.keys(g),
+            ...Object.keys(bestMate.genes)
+          ]);
+
+          allGeneKeys.forEach(k => {
+            if (k === 'diet') {
+              const dietA = g.diet || {};
+              const dietB = bestMate.genes.diet || {};
+              const avgDiet = {
+                meat: ((dietA.meat ?? 0.05) + (dietB.meat ?? 0.05)) / 2,
+                plant: ((dietA.plant ?? 0.85) + (dietB.plant ?? 0.85)) / 2,
+                carcass: ((dietA.carcass ?? 0.10) + (dietB.carcass ?? 0.10)) / 2,
+              };
+              childGenes.diet = Genome.mutateAndNormalizeDiet(avgDiet);
+            } else {
+              const geneA = g[k] ?? bestMate.genes[k] ?? 0.5;
+              const geneB = bestMate.genes[k] ?? g[k] ?? 0.5;
+              const avg = (geneA + geneB) / 2;
+
+              const mutMul = engine.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
+              if (k === 'colorHue') {
+                childGenes[k] = Math.round((avg + (Math.random() * 20 - 10) * mutMul + 360) % 360);
+              } else if (k === 'thermal') {
+                childGenes[k] = parseFloat(
+                  Math.max(-1.0, Math.min(1.0, avg + (Math.random() * 0.1 - 0.05) * mutMul)).toFixed(2)
+                );
+              } else {
+                childGenes[k] = parseFloat(
+                  Math.max(0.05, Math.min(1.0, avg + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2)
+                );
+              }
+            }
+          });
+
+          const speciationCheck = Genome.evaluateAnimalSpeciation(childGenes, founderGenes);
+          let finalSpeciesName = baseSpecies;
+
+          if (speciationCheck.diverged) {
+            finalSpeciesName = `${rootName} ${speciationCheck.desc}`;
+            const isNew = engine.registerSpecies(
+              finalSpeciesName,
+              'animal',
+              childGenes,
+              baseSpecies,
+              rootName,
+              speciationCheck.traitName + ' ' + speciationCheck.desc
+            );
+
+            if (isNew && typeof toast === 'function') {
+              toast(`🧬 Nova Espécie: "${finalSpeciesName}" surgiu por adaptação de ${speciationCheck.traitName}!`);
+            }
+          }
+
+          const gestA = g.gestation ?? 0.45;
+          const gestB = bestMate.genes?.gestation ?? 0.45;
+          const offA = g.offspringCount ?? 0.45;
+          const offB = bestMate.genes?.offspringCount ?? 0.45;
+
+          let clutchSize;
+          if (isCarnivore) {
+            clutchSize = totalCarnivores < 20 ? 3 : (totalCarnivores < 40 ? 2 : (Math.random() < ((offA + offB) / 2) ? 2 : 1));
+          } else {
+            clutchSize = Math.random() < ((offA + offB) / 2) ? 2 : 1;
+          }
+          if (speciationCheck.diverged && clutchSize < 2) clutchSize = 2;
+
+          this.isPregnant = true;
+          const gestFactor = (isCarnivore && totalCarnivores < 20) ? 0.70 : 1.0;
+          this.gestationTicks = Math.max(15, Math.round((28 + ((gestA + gestB) / 2) * 35) * gestFactor));
+          this.pregnantGenes = childGenes;
+          this.pregnantSpeciesName = finalSpeciesName;
+          this.pregnantClutchSize = clutchSize;
+          this.stateLabel = 'Iniciou Gestação';
+
+          const mateCooldownVal = (isCarnivore && totalCarnivores < 20) ? 45 : 85;
+          this.mateCooldown = mateCooldownVal;
+          bestMate.mateCooldown = mateCooldownVal;
+          return;
+        }
+      }
+    }
+
+    if (targetX !== null && targetY !== null) {
+      const angle = Math.atan2(targetY - this.y, targetX - this.x);
+      this.vx = this.vx * 0.55 + Math.cos(angle) * desiredSpeed * 0.45;
+      this.vy = this.vy * 0.55 + Math.sin(angle) * desiredSpeed * 0.45;
+    } else {
+      if (Math.random() < 0.07) {
+        const randAngle = Math.random() * Math.PI * 2;
+        this.vx = Math.cos(randAngle) * desiredSpeed;
+        this.vy = Math.sin(randAngle) * desiredSpeed;
+      }
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════
+// 4. MOTOR DA SIMULAÇÃO (SimulationEngine)
+// ════════════════════════════════════════════════════
 
 class SimulationEngine {
   constructor() {
-
     this.showGridLines = true;
-    this.climateTrend = 0.0;     // Deslocamento gradual da temperatura global
-    this.hydrologyTimer = 0;     // Cronômetro para avanço/recuo de rios e lagos
+    this.climateTrend = 0.0;
+    this.hydrologyTimer = 0;
 
     this.gridCols = 32;
     this.gridRows = 22;
@@ -146,27 +1221,24 @@ class SimulationEngine {
     this.disasterEffects = [];
     this.impactWinterTicks = 0;
 
-    // Contadores temporários para diagnóstico da vegetação.
-this.plantMetrics = {
-  reproduced: 0,
-  nutrientDeaths: 0,
-  ageDeaths: 0,
-  floodDeaths: 0,
-  grazingDeaths: 0,
-  growthUpdates: 0, // Atualizações em que houve crescimento.
-  growthBlocked: 0  // Atualizações bloqueadas por falta de nitrogênio.
-};
+    this.plantMetrics = {
+      reproduced: 0,
+      nutrientDeaths: 0,
+      ageDeaths: 0,
+      floodDeaths: 0,
+      grazingDeaths: 0,
+      growthUpdates: 0,
+      growthBlocked: 0
+    };
 
-// Contadores temporários para diagnóstico da mortalidade animal.
-// Contadores temporários para diagnóstico da mortalidade animal.
-this.animalMetrics = {
-  energyDeaths: 0,
-  ageDeaths: 0,
-  sickDeaths: 0,
-  healthyDeaths: 0,
-  juvenileDeaths: 0,
-  adultDeaths: 0
-};
+    this.animalMetrics = {
+      energyDeaths: 0,
+      ageDeaths: 0,
+      sickDeaths: 0,
+      healthyDeaths: 0,
+      juvenileDeaths: 0,
+      adultDeaths: 0
+    };
 
     this.historyInterval = 10;
     this.latestDiagnostics = null;
@@ -191,98 +1263,91 @@ this.animalMetrics = {
       for (let c = 0; c < this.gridCols; c++) {
         const cell = this.grid[r][c];
         if (cell.biome !== 'water') {
-          cell.soilNitrogen = Math.max(cell.soilNitrogen, 65.0);
-          cell.moisture = Math.max(cell.moisture, 0.60);
+          cell.soilNitrogen = Math.min(100, cell.soilNitrogen + 25.0);
+          cell.moisture = Math.max(0.40, cell.moisture);
         }
       }
     }
+
     const neededPlants = Math.max(0, 45 - this.plants.length);
     if (neededPlants > 0) {
-      this.spawnInitialPlants(neededPlants);
+      for (let i = 0; i < neededPlants; i++) {
+        const r = Math.floor(Math.random() * this.gridRows);
+        const c = Math.floor(Math.random() * this.gridCols);
+        this.spawnSinglePlant('Grama Pioneira', { growthSpeed: 0.7, rootEfficiency: 0.7, height: 0.35, defense: 0.2 }, {}, r, c);
+      }
     }
-    this.animals.forEach(a => {
-      a.energy = Math.max(a.energy, 45.0);
-      a.isDiseased = false;
-    });
+
     if (typeof toast === 'function') {
-      toast('🚑 Socorro Ecológico: Solos enriquecidos, flora replantada e fauna revitalizada!');
+      toast('🚑 Intervenção de Emergência executada: solo nutrido e plantas pioneiras semeadas!');
     }
   }
 
   init(canvas, worldConfig) {
-    this.pause();
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.worldConfig = worldConfig || {};
 
-    const sz = this.worldConfig.gridSize || 45;
-    this.gridCols = Math.min(120, Math.max(20, Math.round(sz * 0.75)));
-    this.gridRows = Math.min(80, Math.max(15, Math.round(sz * 0.5)));
+    const sz = worldConfig.size || 'medium';
+    if (sz === 'small') { this.gridCols = 24; this.gridRows = 16; }
+    else if (sz === 'large') { this.gridCols = 40; this.gridRows = 28; }
+    else { this.gridCols = 32; this.gridRows = 22; }
 
     this.canvas.width = this.gridCols * this.cellSize;
     this.canvas.height = this.gridRows * this.cellSize;
 
-    this.seasonLength = this.worldConfig.seasonLengthTicks || 120;
-    this.seasonIndex = 0;
     this.tickCount = 0;
     this.generation = 1;
+    this.seasonIndex = 0;
     this.selectedEntity = null;
-    this.highlightedSpecies = null;
-
+    this.history = [];
     this.speciesCatalog = [];
     this.speciesRegistry = {};
-    this.history = [];
+    this.spawnGroupCenters = [];
 
-    this.buildGrid(this.worldConfig.biome || 'random');
-    // DIAGNÓSTICO TEMPORÁRIO: distribuição dos biomas e nitrogênio.
-const biomeStats = {};
-
-for (const row of this.grid) {
-  for (const cell of row) {
-    if (!biomeStats[cell.biome]) {
-      biomeStats[cell.biome] = {
-        cells: 0,
-        totalNitrogen: 0
-      };
+    this.buildGrid(worldConfig.biome || 'fertile');
+    const biomeStats = {};
+    for (const row of this.grid) {
+      for (const cell of row) {
+        if (!biomeStats[cell.biome]) {
+          biomeStats[cell.biome] = 0;
+        }
+        biomeStats[cell.biome]++;
+      }
     }
 
-    biomeStats[cell.biome].cells++;
-    biomeStats[cell.biome].totalNitrogen += cell.soilNitrogen;
-  }
-}
+    const animalConfig = worldConfig.speciesCounts?.animals || [];
+    const plantConfig = worldConfig.speciesCounts?.plants || [];
 
-console.log('=== DIAGNÓSTICO DO SOLO INICIAL ===');
+    const totalInitAnimals = animalConfig.reduce((acc, s) => acc + (s.count || 0), 0) || 20;
+    const totalInitPlants = plantConfig.reduce((acc, s) => acc + (s.count || 0), 0) || 50;
 
-for (const [biome, stats] of Object.entries(biomeStats)) {
-  console.log(biome, {
-    celulas: stats.cells,
-    nitrogenioMedio: (stats.totalNitrogen / stats.cells).toFixed(2)
-  });
-}
-    this.spawnInitialPlants(this.worldConfig.initialPlantCount || 70);
-    
-    this.spawnInitialAnimals(this.worldConfig.initialAnimalCount || 25);
+    this.spawnInitialPlants(totalInitPlants);
+    this.spawnInitialAnimals(totalInitAnimals);
 
+    this.terrainCanvas = null;
     this.createTerrainCache();
+
+    this.updateStatsUI();
+    this.updateCensusUI();
     this.render();
   }
 
   toggleHighlightSpecies(speciesName) {
     if (this.highlightedSpecies === speciesName) {
       this.highlightedSpecies = null;
-      if (typeof toast === 'function') toast('Foco de espécie desativado.');
+      if (typeof toast === 'function') {
+        toast('Foco cancelado: exibindo todas as espécies normalmente.');
+      }
     } else {
       this.highlightedSpecies = speciesName;
-      const count = this.animals.filter(a => (a.speciesName || a.name) === speciesName).length +
-                    this.plants.filter(p => p.name === speciesName).length;
       if (typeof toast === 'function') {
-        toast(`🔍 Destacando ${count} exemplar(es) de "${speciesName}"!`);
+        toast(`Foco ativo: destacando "${speciesName}" (outras esmaecidas).`);
       }
     }
     this.render();
     this.updateCensusUI();
   }
-
 
   createTerrainCache() {
     if (!this.canvas) return;
@@ -291,26 +1356,28 @@ for (const [biome, stats] of Object.entries(biomeStats)) {
     }
     this.terrainCanvas.width = this.canvas.width;
     this.terrainCanvas.height = this.canvas.height;
-    const tCtx = this.terrainCanvas.getContext('2d');
+    const tctx = this.terrainCanvas.getContext('2d');
+    if (!tctx) return;
 
-    const BIOME_TILES = {
-      water:   '#183a66',
-      fertile: '#1a4e1d',
-      dry:     '#5e5025',
-      rocky:   '#3c4146'
+    const baseColors = {
+      fertile: '#1a3320',
+      arid: '#382e1e',
+      tundra: '#1f2a38',
+      wetland: '#153028',
+      water: '#0d223a',
+      rocky: '#262626'
     };
 
     for (let r = 0; r < this.gridRows; r++) {
       for (let c = 0; c < this.gridCols; c++) {
         const cell = this.grid[r][c];
-        const x = c * this.cellSize, y = r * this.cellSize;
-        tCtx.fillStyle = BIOME_TILES[cell.biome] || '#1a4e1d';
-        tCtx.fillRect(x, y, this.cellSize, this.cellSize);
+        tctx.fillStyle = cell.cachedColor || baseColors[cell.biome] || '#1a3320';
+        tctx.fillRect(c * this.cellSize, r * this.cellSize, this.cellSize, this.cellSize);
 
         if (this.showGridLines) {
-          tCtx.strokeStyle = 'rgba(0,0,0,0.14)';
-          tCtx.lineWidth = 1;
-          tCtx.strokeRect(x, y, this.cellSize, this.cellSize);
+          tctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+          tctx.lineWidth = 1;
+          tctx.strokeRect(c * this.cellSize, r * this.cellSize, this.cellSize, this.cellSize);
         }
       }
     }
@@ -318,105 +1385,102 @@ for (const [biome, stats] of Object.entries(biomeStats)) {
 
   toggleGridLines() {
     this.showGridLines = !this.showGridLines;
-    const btn = document.getElementById('btn-toggle-grid');
-    if (btn) btn.classList.toggle('active', this.showGridLines);
+    this.terrainCanvas = null;
+    this.createTerrainCache();
     this.render();
   }
 
   registerSpecies(name, type, genes, ancestor = null, rootName = null, divergentTrait = null) {
     if (!this.speciesRegistry[name]) {
-      this.speciesRegistry[name] = {
-        founderGenes: JSON.parse(JSON.stringify(genes)),
-        ancestor: ancestor,
-        rootName: rootName || name
-      };
       const color = SPECIES_PALETTE[this.speciesCatalog.length % SPECIES_PALETTE.length];
-      this.speciesCatalog.push({
-        id: 'sp_' + this.speciesCatalog.length,
+      const entry = {
         name: name,
         type: type,
         color: color,
+        originGeneration: this.generation,
+        originTick: this.tickCount,
         ancestor: ancestor,
+        rootName: rootName || name,
         divergentTrait: divergentTrait,
-        founderGenes: JSON.parse(JSON.stringify(genes)),
-        generation: this.generation
-      });
+        founderGenes: JSON.parse(JSON.stringify(genes || {}))
+      };
+      this.speciesRegistry[name] = entry;
+      this.speciesCatalog.push(entry);
       return true;
     }
     return false;
   }
 
   recordHistorySnapshot() {
-    const popCounts = {};
+    const snap = {
+      tick: this.tickCount,
+      generation: this.generation,
+      animals: this.animals.length,
+      plants: this.plants.length,
+      carcasses: this.carcasses.length,
+      animalSpecies: {},
+      plantSpecies: {},
+      speciesGeneAverages: {}
+    };
+
     const geneSums = {};
     const geneCounts = {};
-    const meanGenes = {};
 
-    // 1. Contagem e soma gênica dos animais
     this.animals.forEach(a => {
       const sp = a.speciesName || a.name;
-      popCounts[sp] = (popCounts[sp] || 0) + 1;
+      snap.animalSpecies[sp] = (snap.animalSpecies[sp] || 0) + 1;
 
       if (!geneSums[sp]) {
-        geneSums[sp] = { size: 0, speed: 0, dietMeat: 0, thermal: 0 };
+        geneSums[sp] = { size: 0, speed: 0, perception: 0, aggression: 0, count: 0 };
         geneCounts[sp] = 0;
       }
-      geneSums[sp].size += a.genes.size;
-      geneSums[sp].speed += a.genes.speed;
-      geneSums[sp].dietMeat += (a.genes.diet?.meat || 0);
-      geneSums[sp].thermal += a.genes.thermal;
+      const g = a.genes || {};
+      geneSums[sp].size += (g.size ?? 0.5);
+      geneSums[sp].speed += (g.speed ?? 0.5);
+      geneSums[sp].perception += (g.perception ?? 0.5);
+      geneSums[sp].aggression += (g.aggression ?? 0.3);
       geneCounts[sp]++;
     });
 
-    // Média gênica dos animais
     Object.keys(geneSums).forEach(sp => {
       const n = geneCounts[sp] || 1;
-      meanGenes[sp] = {
-        size: geneSums[sp].size / n,
-        speed: geneSums[sp].speed / n,
-        dietMeat: geneSums[sp].dietMeat / n,
-        thermal: geneSums[sp].thermal / n
+      snap.speciesGeneAverages[sp] = {
+        size: parseFloat((geneSums[sp].size / n).toFixed(3)),
+        speed: parseFloat((geneSums[sp].speed / n).toFixed(3)),
+        perception: parseFloat((geneSums[sp].perception / n).toFixed(3)),
+        aggression: parseFloat((geneSums[sp].aggression / n).toFixed(3))
       };
     });
 
-    // 2. Contagem e soma gênica das plantas (em um único loop)
     const plantSums = {};
     const plantCounts = {};
-
     this.plants.forEach(p => {
       const sp = p.name;
-      popCounts[sp] = (popCounts[sp] || 0) + 1;
+      snap.plantSpecies[sp] = (snap.plantSpecies[sp] || 0) + 1;
 
       if (!plantSums[sp]) {
-        plantSums[sp] = { height: 0, defense: 0, rootEfficiency: 0, thermal: 0 };
+        plantSums[sp] = { height: 0, rootEfficiency: 0, growthSpeed: 0, defense: 0, count: 0 };
         plantCounts[sp] = 0;
       }
-      plantSums[sp].height += (p.genes.height || 0.5);
-      plantSums[sp].defense += (p.genes.defense || 0.3);
-      plantSums[sp].rootEfficiency += (p.genes.rootEfficiency || 0.5);
-      plantSums[sp].thermal += (p.genes.thermal || 0.0);
+      const g = p.genes || {};
+      plantSums[sp].height += (g.height ?? 0.5);
+      plantSums[sp].rootEfficiency += (g.rootEfficiency ?? 0.5);
+      plantSums[sp].growthSpeed += (g.growthSpeed ?? 0.5);
+      plantSums[sp].defense += (g.defense ?? 0.3);
       plantCounts[sp]++;
     });
 
-    // Média gênica das plantas
     Object.keys(plantSums).forEach(sp => {
       const n = plantCounts[sp] || 1;
-      meanGenes[sp] = {
-        height: plantSums[sp].height / n,
-        defense: plantSums[sp].defense / n,
-        rootEfficiency: plantSums[sp].rootEfficiency / n,
-        thermal: plantSums[sp].thermal / n
+      snap.speciesGeneAverages[sp] = {
+        height: parseFloat((plantSums[sp].height / n).toFixed(3)),
+        rootEfficiency: parseFloat((plantSums[sp].rootEfficiency / n).toFixed(3)),
+        growthSpeed: parseFloat((plantSums[sp].growthSpeed / n).toFixed(3)),
+        defense: parseFloat((plantSums[sp].defense / n).toFixed(3))
       };
     });
 
-    // 3. Salva o snapshot na linha do tempo
-    this.history.push({
-      tick: this.tickCount,
-      generation: this.generation,
-      populations: popCounts,
-      meanGenes: meanGenes
-    });
-
+    this.history.push(snap);
     if (this.history.length > 250) {
       this.history.shift();
     }
@@ -424,41 +1488,45 @@ for (const [biome, stats] of Object.entries(biomeStats)) {
 
   buildGrid(biomeType) {
     this.grid = [];
-    const BIOME_WEIGHTS = {
-      random:   { water: 0.12, fertile: 0.50, dry: 0.24, rocky: 0.14 },
-      islands:  { water: 0.50, fertile: 0.34, dry: 0.10, rocky: 0.06 },
-      savanna:  { water: 0.05, fertile: 0.25, dry: 0.60, rocky: 0.10 },
-      fertile:  { water: 0.10, fertile: 0.75, dry: 0.08, rocky: 0.07 },
-      desert:   { water: 0.03, fertile: 0.08, dry: 0.75, rocky: 0.14 },
-      frozen:   { water: 0.22, fertile: 0.08, dry: 0.10, rocky: 0.60 }
+    const baseColors = {
+      fertile: '#1a3320',
+      arid: '#382e1e',
+      tundra: '#1f2a38',
+      wetland: '#153028',
+      water: '#0d223a',
+      rocky: '#262626'
     };
-    const weights = BIOME_WEIGHTS[biomeType] || BIOME_WEIGHTS.random;
 
     for (let r = 0; r < this.gridRows; r++) {
-      this.grid[r] = [];
+      const row = [];
       for (let c = 0; c < this.gridCols; c++) {
-        const noise = (Math.sin(r * 0.4) + Math.cos(c * 0.4) + Math.sin((r + c) * 0.3) + 3) / 6;
-        let biome = 'fertile';
-        if (noise < weights.water) biome = 'water';
-        else if (noise < weights.water + weights.fertile) biome = 'fertile';
-        else if (noise < weights.water + weights.fertile + weights.dry) biome = 'dry';
-        else biome = 'rocky';
+        let b = biomeType;
+        if (Math.random() < 0.08) b = 'water';
+        else if (Math.random() < 0.06) b = 'rocky';
 
-        let moisture = biome === 'water' ? 1.0 : (biome === 'fertile' ? 0.85 : (biome === 'dry' ? 0.28 : 0.40));
-        let maxSoilNitrogen = biome === 'water' ? 0 : (biome === 'fertile' ? 120 : (biome === 'dry' ? 50 : 35));
+        const cell = new GridCell(r, c, this.cellSize, b);
+        cell.elevation = Math.random();
+        cell.moisture = b === 'water' ? 1.0 : (b === 'wetland' ? 0.85 : (b === 'arid' ? 0.2 : 0.6));
+        cell.maxSoilNitrogen = b === 'fertile' ? 120 : (b === 'arid' ? 45 : (b === 'tundra' ? 55 : (b === 'wetland' ? 90 : 20)));
+        cell.soilNitrogen = cell.maxSoilNitrogen * (0.5 + Math.random() * 0.4);
+        cell.organicBiomass = Math.random() * 5.0;
 
-        this.grid[r][c] = {
-          r, c,
-          biome,
-          moisture,
-          soilNitrogen: maxSoilNitrogen * 0.85,
-          maxSoilNitrogen: maxSoilNitrogen,
-          organicBiomass: 0.0,
-          plant: null,
-          carcass: null
-        };
+        const base = baseColors[b] || '#1a3320';
+        const lum = Math.floor((Math.random() - 0.5) * 14);
+        cell.cachedColor = this.adjustColor(base, lum);
+
+        row.push(cell);
       }
+      this.grid.push(row);
     }
+  }
+
+  adjustColor(hex, amt) {
+    let num = parseInt(hex.slice(1), 16);
+    let r = Math.min(255, Math.max(0, (num >> 16) + amt));
+    let g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + amt));
+    let b = Math.min(255, Math.max(0, (num & 0x0000FF) + amt));
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
   }
 
   spawnInitialPlants(count) {
@@ -467,245 +1535,154 @@ for (const [biome, stats] of Object.entries(biomeStats)) {
 
     if (speciesList && speciesList.length > 0) {
       speciesList.forEach(sp => {
-        const n = Math.max(0, parseInt(sp.count) || 0);
-        this.registerSpecies(sp.name, 'plant', sp.genes);
+        const n = sp.count || 10;
         for (let i = 0; i < n; i++) {
-          this.spawnSinglePlant(sp.name, sp.genes, sp.customImages || {});
+          const r = Math.floor(Math.random() * this.gridRows);
+          const c = Math.floor(Math.random() * this.gridCols);
+          this.spawnSinglePlant(sp.name, sp.genes, sp.customImages || {}, r, c);
         }
       });
       return;
     }
 
-    const savedPlants = JSON.parse(localStorage.getItem('evo_plants') || '[]');
-    const targetCount = count || 140;
+    const targetCount = count || 40;
     for (let i = 0; i < targetCount; i++) {
-      let sp = savedPlants.length > 0 ? savedPlants[i % savedPlants.length] : null;
-      let name = sp ? sp.name : 'Grama Nutritiva';
-      let genes = sp ? { ...sp.genes } : {
-        height: 0.4,
-        rootEfficiency: 0.7,
-        growthSpeed: 0.8,
-        defense: 0.15,
-        fruitAttraction: 0.4,
-        parasiteResistance: 0.5,
-        thermal: 0.0,
-        colorHue: 115
-      };
-      this.registerSpecies(name, 'plant', genes);
-      this.spawnSinglePlant(name, genes, sp?.customImages || {});
-    }
-  }
-
-  spawnSinglePlant(name, genes, customImages) {
-    let attempts = 0;
-    while (attempts < 40) {
-      attempts++;
       const r = Math.floor(Math.random() * this.gridRows);
       const c = Math.floor(Math.random() * this.gridCols);
-      const cell = this.grid[r]?.[c];
-
-      if (cell && cell.biome !== 'water' && !cell.plant) {
-        const plant = {
-          id: 'plant_' + Math.random().toString(36).substr(2, 9),
-          name: name || 'Planta',
-          r, c,
-          x: (c + 0.5) * this.cellSize,
-          y: (r + 0.5) * this.cellSize,
-          energy: 40.0,
-          growth: 0.35 + Math.random() * 0.4,
-          hasFruit: false,
-          fruitCount: 0,
-          age: Math.floor(Math.random() * 40),
-          genes: { ...genes },
-          customImages: { ...(customImages || {}) }
-        };
-        cell.plant = plant;
-        this.plants.push(plant);
-        return plant;
-      }
+      this.spawnSinglePlant('Grama Comum', { growthSpeed: 0.6, height: 0.4, defense: 0.25, rootEfficiency: 0.6 }, {}, r, c);
     }
-    return null;
   }
-  // Encontra um ponto central seguro em terra firme para o bando
-// Encontra um ponto em terra firme, priorizando distância dos grupos existentes.
-findLandCenter() {
-    const margin = this.cellSize * 2;
-    const maxX = (this.gridCols - 2) * this.cellSize;
-    const maxY = (this.gridRows - 2) * this.cellSize;
 
-    const candidates = [];
+  spawnSinglePlant(name, genes, customImages, targetR, targetC) {
+    const r = (targetR !== undefined) ? targetR : Math.floor(Math.random() * this.gridRows);
+    const c = (targetC !== undefined) ? targetC : Math.floor(Math.random() * this.gridCols);
+    const cell = this.grid[r]?.[c];
+    if (!cell || cell.biome === 'water' || cell.plant) return null;
 
-    // Procura até 100 posições aleatórias em terra firme.
-    for (let attempts = 0; attempts < 100; attempts++) {
-        const cx = margin + Math.random() * (maxX - margin);
-        const cy = margin + Math.random() * (maxY - margin);
+    this.registerSpecies(name, 'plant', genes);
+    const plant = new Plant(
+      'plant_' + Math.random().toString(36).substr(2, 9),
+      name || 'Vegetal',
+      r, c,
+      this.cellSize,
+      genes,
+      customImages
+    );
+    cell.plant = plant;
+    this.plants.push(plant);
+    return plant;
+  }
 
-        const r = Math.floor(cy / this.cellSize);
-        const c = Math.floor(cx / this.cellSize);
-
-        // Ignora posições inválidas ou cobertas por água.
-        if (!this.grid[r]?.[c] || this.grid[r][c].biome === 'water') {
-            continue;
+  spawnSpeciesInClusters(name, genes, customImages, count, clusterCount = 3) {
+    const validCells = [];
+    for (let r = 0; r < this.gridRows; r++) {
+      for (let c = 0; c < this.gridCols; c++) {
+        if (this.grid[r][c].biome !== 'water') {
+          validCells.push({
+            x: (c + 0.5) * this.cellSize,
+            y: (r + 0.5) * this.cellSize
+          });
         }
-
-        // Calcula a distância até o grupo mais próximo.
-        let minDistance = Infinity;
-
-        for (const center of this.spawnGroupCenters) {
-            const distance = Math.hypot(
-                cx - center.x,
-                cy - center.y
-            );
-
-            minDistance = Math.min(minDistance, distance);
-        }
-
-        candidates.push({
-            x: cx,
-            y: cy,
-            distance: minDistance
-        });
-    }
-
-    // Se não houver grupos anteriores, escolhe uma posição válida aleatória.
-    if (this.spawnGroupCenters.length === 0) {
-        if (candidates.length > 0) {
-            const selected = candidates[
-                Math.floor(Math.random() * candidates.length)
-            ];
-
-            this.spawnGroupCenters.push({ x: selected.x, y: selected.y });
-            return { x: selected.x, y: selected.y };
-        }
-    }
-
-    // Escolhe a posição mais distante dos centros já utilizados.
-    if (candidates.length > 0) {
-        candidates.sort((a, b) => b.distance - a.distance);
-
-        // Sorteia entre as 5 melhores posições para evitar distribuição previsível.
-        const bestCandidates = candidates.slice(0, 5);
-        const selected = bestCandidates[
-            Math.floor(Math.random() * bestCandidates.length)
-        ];
-
-        this.spawnGroupCenters.push({ x: selected.x, y: selected.y });
-
-        return { x: selected.x, y: selected.y };
-    }
-
-    // Alternativa caso nenhuma posição válida seja encontrada.
-    return {
-        x: (this.gridCols * this.cellSize) / 2,
-        y: (this.gridRows * this.cellSize) / 2
-    };
-}
-  // Divide uma população em grupos de 2 a 5 indivíduos (nunca deixando ninguém isolado)
-  spawnSpeciesInClusters(name, genes, customImages, totalCount) {
-    if (totalCount <= 0) return;
-    this.registerSpecies(name, 'animal', genes);
-
-    const clusters = [];
-    let remaining = totalCount;
-
-    while (remaining > 0) {
-      // Se restam até 5 indivíduos, formam um único grupo
-      if (remaining <= 5) {
-        clusters.push(remaining);
-        break;
       }
-      // Sorteia tamanho do grupo (2 a 4 indivíduos)
-      let sz = Math.floor(Math.random() * 3) + 2;
-      // Evita deixar sobrar apenas 1 indivíduo sozinho no final
-      if (remaining - sz === 1) sz++;
-      clusters.push(sz);
-      remaining -= sz;
     }
 
-    // Spawna cada subgrupo agrupado em torno de um centro territorial comum
-    clusters.forEach(groupSize => {
-      const center = this.findLandCenter();
-      for (let i = 0; i < groupSize; i++) {
-        this.spawnSingleAnimal(name, genes, customImages, center.x, center.y);
+    if (validCells.length === 0) return;
+
+    this.spawnGroupCenters ??= [];
+    const minCenterDist = Math.max(120, Math.min(this.canvas.width, this.canvas.height) * 0.28);
+    const centers = [];
+    const actualClusters = Math.min(clusterCount, Math.max(1, Math.floor(count / 2)));
+
+    for (let k = 0; k < actualClusters; k++) {
+      let chosen = null, maxDistToOthers = -1;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const candidate = validCells[Math.floor(Math.random() * validCells.length)];
+        let minDist = Infinity;
+        const allExisting = [...this.spawnGroupCenters, ...centers];
+        allExisting.forEach(existing => {
+          const d = Math.hypot(candidate.x - existing.x, candidate.y - existing.y);
+          if (d < minDist) minDist = d;
+        });
+
+        if (minDist >= minCenterDist) { chosen = candidate; break; }
+        if (minDist > maxDistToOthers) { maxDistToOthers = minDist; chosen = candidate; }
+      }
+      const finalCenter = chosen || validCells[Math.floor(Math.random() * validCells.length)];
+      centers.push(finalCenter);
+      this.spawnGroupCenters.push(finalCenter);
+    }
+
+    const basePerCluster = Math.floor(count / centers.length);
+    let remainder = count % centers.length;
+
+    centers.forEach((center, idx) => {
+      const clusterSize = basePerCluster + (idx < remainder ? 1 : 0);
+      for (let i = 0; i < clusterSize; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 45;
+        const targetX = Math.max(15, Math.min((this.gridCols * this.cellSize) - 15, center.x + Math.cos(angle) * radius));
+        const targetY = Math.max(15, Math.min((this.gridRows * this.cellSize) - 15, center.y + Math.sin(angle) * radius));
+        this.spawnAnimal(name, genes, customImages, targetX, targetY);
       }
     });
   }
 
   spawnInitialAnimals(count) {
     this.animals = [];
-        this.spawnGroupCenters = []; // Registra os centros dos grupos desta simulação.
+    this.carcasses = [];
+    this.spawnGroupCenters = [];
     const speciesList = this.worldConfig?.speciesCounts?.animals;
 
     if (speciesList && speciesList.length > 0) {
       speciesList.forEach(sp => {
-        const n = Math.max(0, parseInt(sp.count) || 0);
-        this.spawnSpeciesInClusters(sp.name, sp.genes, sp.customImages || {}, n);
+        const n = sp.count || 6;
+        const isCarnivore = (sp.genes?.diet?.meat || 0) > 0.45;
+        const clusters = isCarnivore ? Math.max(1, Math.round(n / 3)) : Math.max(2, Math.round(n / 6));
+        this.spawnSpeciesInClusters(sp.name, sp.genes, sp.customImages || {}, n, clusters);
       });
       return;
     }
 
-    // Fallback caso não venha da tela de configuração do mundo
-    const savedAnimals = JSON.parse(localStorage.getItem('evo_animals') || '[]');
-    const targetCount = count || 25;
+    const defaultGenesHerb = {
+      size: 0.4, diet: { meat: 0.05, plant: 0.85, carcass: 0.10 },
+      speed: 0.6, perception: 0.6, health: 0.6, thermal: 0.0, colorHue: 120
+    };
+    const defaultGenesCarn = {
+      size: 0.65, diet: { meat: 0.80, plant: 0.05, carcass: 0.15 },
+      speed: 0.7, perception: 0.8, aggression: 0.7, health: 0.6, thermal: 0.0, colorHue: 15
+    };
 
-    
-if (savedAnimals.length > 0) {
-  // Distribui a quantidade solicitada entre as espécies salvas.
-  const baseCount = Math.floor(targetCount / savedAnimals.length);
-  const remainder = targetCount % savedAnimals.length;
+    const predCount = Math.max(2, Math.round((count || 18) * 0.25));
+    const herbCount = Math.max(4, (count || 18) - predCount);
 
-  savedAnimals.forEach((sp, index) => {
-    // Algumas espécies recebem um indivíduo extra para completar o total.
-    const speciesCount = baseCount + (index < remainder ? 1 : 0);
-
-    // Não cria indivíduos quando a quantidade distribuída é zero.
-    if (speciesCount > 0) {
-      this.spawnSpeciesInClusters(
-        sp.name,
-        sp.genes,
-        sp.customImages || {},
-        speciesCount
-      );
-    }
-  });
-}
-else {
-      const predCount = Math.max(2, Math.round(targetCount * 0.25));
-      const herbCount = Math.max(4, targetCount - predCount);
-
-      const herbGenes = {
-        size: 0.35, diet: { meat: 0.0, plant: 0.90, carcass: 0.10 },
-        speed: 0.60, perception: 0.65, gestation: 0.30, offspringCount: 0.70,
-        aggression: 0.10, health: 0.60, thermal: 0.0, colorHue: 125
-      };
-      const predGenes = {
-        size: 0.65, diet: { meat: 0.85, plant: 0.05, carcass: 0.10 },
-        speed: 0.70, perception: 0.80, gestation: 0.50, offspringCount: 0.35,
-        aggression: 0.75, health: 0.60, thermal: 0.0, colorHue: 15
-      };
-
-      this.spawnSpeciesInClusters('Herbívoro Campestre', herbGenes, {}, herbCount);
-      this.spawnSpeciesInClusters('Predador Alfa', predGenes, {}, predCount);
-    }
+    this.spawnSpeciesInClusters('Lebre Saltadora', defaultGenesHerb, {}, herbCount, 3);
+    this.spawnSpeciesInClusters('Lobo Caçador', defaultGenesCarn, {}, predCount, 2);
   }
 
-spawnSingleAnimal(name, genes, customImages, centerX = null, centerY = null) {
-    const margin = 14;
-    const maxX = this.gridCols * this.cellSize - margin;
-    const maxY = this.gridRows * this.cellSize - margin;
+  findLandCenter() {
+    let sumX = 0, sumY = 0, count = 0;
+    for (let r = 0; r < this.gridRows; r++) {
+      for (let c = 0; c < this.gridCols; c++) {
+        if (this.grid[r][c].biome !== 'water') {
+          sumX += (c + 0.5) * this.cellSize;
+          sumY += (r + 0.5) * this.cellSize;
+          count++;
+        }
+      }
+    }
+    if (count > 0) return { x: sumX / count, y: sumY / count };
+    return { x: (this.gridCols * this.cellSize) / 2, y: (this.gridRows * this.cellSize) / 2 };
+  }
 
+  spawnAnimal(name, genes, customImages, targetX = null, targetY = null) {
     let rx, ry;
-
-    if (centerX !== null && centerY !== null) {
-      // Espalha os membros do grupo a uma distância de contato visual (10px a 40px do centro)
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 10 + Math.random() * 30;
-      rx = Math.max(margin, Math.min(maxX, centerX + Math.cos(angle) * dist));
-      ry = Math.max(margin, Math.min(maxY, centerY + Math.sin(angle) * dist));
-
-      const r = Math.floor(ry / this.cellSize);
-      const c = Math.floor(rx / this.cellSize);
-      if (this.grid[r]?.[c]?.biome === 'water') {
+    if (targetX !== null && targetY !== null) {
+      rx = targetX;
+      ry = targetY;
+      const cr = Math.floor(ry / this.cellSize);
+      const cc = Math.floor(rx / this.cellSize);
+      if (this.grid[cr]?.[cc]?.biome === 'water') {
+        const { x: centerX, y: centerY } = this.findLandCenter();
         rx = centerX;
         ry = centerY;
       }
@@ -716,39 +1693,21 @@ spawnSingleAnimal(name, genes, customImages, centerX = null, centerY = null) {
     }
 
     const animalGenes = {
-  ...genes,
-  diet: genes.diet
-    ? { ...genes.diet }
-    : { meat: 0.05, plant: 0.85, carcass: 0.10 }
-};
+      ...genes,
+      diet: genes.diet ? { ...genes.diet } : { meat: 0.05, plant: 0.85, carcass: 0.10 }
+    };
 
     this.registerSpecies(name, 'animal', genes);
 
-    const animal = {
-      id: 'anim_' + Math.random().toString(36).substr(2, 9),
-      name: name || 'Criatura',
-      speciesName: name || 'Criatura',
-      x: rx,
-      y: ry,
-      vx: (Math.random() - 0.5) * 1.5,
-      vy: (Math.random() - 0.5) * 1.5,
-      energy: 90.0 + Math.random() * 10,
-      maxEnergy: 100.0,
-      age: Math.floor(Math.random() * 40),
-      genes: animalGenes,
-      customImages: { ...(customImages || {}) },
-      state: 'wandering',
-      stateLabel: 'Forrageando',
-      mateCooldown: 30,
-      attackCooldown: 0,
-      isDiseased: false,
-      diseaseTimer: 0,
-      isPregnant: false,
-      gestationTicks: 0,
-      pregnantGenes: null,
-      pregnantSpeciesName: null,
-      pregnantClutchSize: 1
-    };
+    const animal = new Animal(
+      'anim_' + Math.random().toString(36).substr(2, 9),
+      name || 'Criatura',
+      name || 'Criatura',
+      rx, ry,
+      animalGenes,
+      customImages
+    );
+
     this.animals.push(animal);
     return animal;
   }
@@ -772,399 +1731,219 @@ spawnSingleAnimal(name, genes, customImages, centerX = null, centerY = null) {
     else this.start();
   }
 
-  setSpeed(val) {
-    this.speed = val;
+  setSpeed(s) {
+    this.speed = Math.max(1, Math.min(10, s));
   }
 
- loop() {
-    if (!this.isRunning) return;
-
-    try {
-      for (let s = 0; s < this.speed; s++) {
-        this.updateTick();
-      }
-      this.render();
-      this.updateStatsUI();
-    } catch (err) {
-      console.error("Erro recuperado na simulação:", err);
-    }
-
-    if (this.isRunning) {
-      this.animFrameId = requestAnimationFrame(() => this.loop());
-    }
-  }
-
-  fastForward(ticks = 50) {
-    const wasRunning = this.isRunning;
-    this.pause();
-    for (let t = 0; t < ticks; t++) {
+  fastForward(ticks) {
+    for (let i = 0; i < ticks; i++) {
       this.updateTick();
     }
     this.render();
     this.updateStatsUI();
-    if (wasRunning) this.start();
+  }
+
+  loop() {
+    if (!this.isRunning) return;
+    for (let i = 0; i < this.speed; i++) {
+      this.updateTick();
+    }
+    this.render();
+    this.updateStatsUI();
+    this.animFrameId = requestAnimationFrame(() => this.loop());
   }
 
   updateTick() {
-  this.tickCount++;
+    this.tickCount++;
 
-  // OTIMIZAÇÃO ULTRA-FPS: Cache trófico O(N) único para eliminar varreduras quadráticas O(N^2)
-  const carnivoresList = [];
-  const herbivoresList = [];
-  const aTotal = this.animals.length;
-  for (let i = 0; i < aTotal; i++) {
-    const a = this.animals[i];
-    if ((a.genes?.diet?.meat || 0) > 0.45) carnivoresList.push(a);
-    else herbivoresList.push(a);
-  }
-  this._carnivores = carnivoresList;
-  this._herbivores = herbivoresList;
-  // Contadores temporários de comportamento alimentar.
-this.aiMetrics ??= {
-  fleeEvents: 0,
-  herbivoreMeals: 0,
-  plantTargets: 0,
-  plantApproaches: 0,
-  carcassMeals: 0,
-   herbivoreCarcassMeals: 0,
-  carnivoreCarcassMeals: 0,
-  carcassTargets: 0, // Conta quantas vezes uma carcaça é selecionada como alvo.
-  carcassDistanceTotal: 0, // Soma das distâncias das carcaças selecionadas.
-carcassFarTargets: 0,     // Seleções de carcaças a mais de 18 pixels.
-carcassMaxDistance: 0,   // Maior distância registrada.
-  prionInfections: 0,
-  crowdInfections: 0,
-  cannibalAttacks: 0,
-  otherSpeciesKills: 0,
-    carnivorePreyKills: 0,
-  nonCarnivorePreyKills: 0
-};
+    const carnivoresList = [];
+    const herbivoresList = [];
+    const aTotal = this.animals.length;
+    for (let i = 0; i < aTotal; i++) {
+      const a = this.animals[i];
+      if ((a.genes?.diet?.meat || 0) > 0.45) carnivoresList.push(a);
+      else herbivoresList.push(a);
+    }
+    this._carnivores = carnivoresList;
+    this._herbivores = herbivoresList;
 
-  // Exibe as métricas das plantas a cada 100 ciclos.
-  if (this.tickCount % 100 === 0) {
-    console.log('=== DIAGNÓSTICO DA VEGETAÇÃO ===');
-    
-    console.log('Plantas vivas:', this.plants.length);
-    console.log('Plantas reproduzidas:', this.plantMetrics.reproduced);
-    console.log('Mortes por falta de nutrientes:', this.plantMetrics.nutrientDeaths);
-    console.log('Mortes por idade:', this.plantMetrics.ageDeaths);
-    console.log('Mortes por enchentes:', this.plantMetrics.floodDeaths);
-    console.log('Remoções por pastoreio:', this.plantMetrics.grazingDeaths);
-    console.log('Atualizações com crescimento:', this.plantMetrics.growthUpdates);
-    
-console.log('Atualizações bloqueadas:', this.plantMetrics.growthBlocked);
-    // Diagnóstico temporário da densidade populacional.
-    let totalNeighbors = 0;
-    let maxNeighbors = 0;
-    let animalsAboveTwo = 0;
-    let animalsAboveFour = 0;
+    this.aiMetrics ??= {
+      fleeEvents: 0,
+      herbivoreMeals: 0,
+      plantTargets: 0,
+      plantApproaches: 0,
+      carcassMeals: 0,
+      herbivoreCarcassMeals: 0,
+      carnivoreCarcassMeals: 0,
+      carcassTargets: 0,
+      carcassDistanceTotal: 0,
+      carcassFarTargets: 0,
+      carcassMaxDistance: 0,
+      prionInfections: 0,
+      crowdInfections: 0,
+      cannibalAttacks: 0,
+      otherSpeciesKills: 0,
+      carnivorePreyKills: 0,
+      nonCarnivorePreyKills: 0
+    };
 
-    // Contadores temporários para diagnosticar a energia dos animais.
-let totalEnergy = 0;
-let herbivoreEnergy = 0;
-let carnivoreEnergy = 0;
-let lowEnergyAnimals = 0;
-let sickLowEnergyAnimals = 0;
-let herbivoreCount = 0;
-let carnivoreCount = 0;
-// Métricas de tamanho dos carnívoros.
-let minCarnivoreSize = Infinity;
-let maxCarnivoreSize = -Infinity;
-let totalCarnivoreSize = 0;
-    
+    // Diagnósticos a cada 100 ciclos
+    if (this.tickCount % 100 === 0) {
+      let totalNeighbors = 0, maxNeighbors = 0, animalsAboveTwo = 0, animalsAboveFour = 0;
+      let totalEnergy = 0, herbivoreEnergy = 0, carnivoreEnergy = 0, lowEnergyAnimals = 0, sickLowEnergyAnimals = 0;
+      let herbivoreCount = 0, carnivoreCount = 0, minCarnivoreSize = Infinity, maxCarnivoreSize = -Infinity, totalCarnivoreSize = 0;
+      let totalHerbivorePerception = 0, totalPredatorPerception = 0, maxHerbivorePerception = 0;
+      let totalHerbivorePlant = 0, herbivoresWithPlantDiet = 0, herbivoresWithoutPlantDiet = 0;
 
-    this.animals.forEach(anim => {
-      let neighbors = 0;
+      this.animals.forEach(anim => {
+        let neighbors = 0;
+        this.animals.forEach(other => {
+          if (other !== anim && Math.hypot(other.x - anim.x, other.y - anim.y) < 48) {
+            neighbors++;
+          }
+        });
 
-      this.animals.forEach(other => {
-        if (
-          other !== anim &&
-          Math.hypot(other.x - anim.x, other.y - anim.y) < 48
-        ) {
-          neighbors++;
+        totalNeighbors += neighbors;
+        maxNeighbors = Math.max(maxNeighbors, neighbors);
+        totalEnergy += anim.energy;
+
+        if (anim.energy < 25) {
+          lowEnergyAnimals++;
+          if (anim.isDiseased) sickLowEnergyAnimals++;
+        }
+
+        if (neighbors >= 2) animalsAboveTwo++;
+        if (neighbors >= 4) animalsAboveFour++;
+
+        if ((anim.genes?.diet?.meat || 0) > 0.45) {
+          carnivoreCount++;
+          carnivoreEnergy += anim.energy;
+          const sz = anim.genes.size || 0.5;
+          minCarnivoreSize = Math.min(minCarnivoreSize, sz);
+          maxCarnivoreSize = Math.max(maxCarnivoreSize, sz);
+          totalCarnivoreSize += sz;
+          totalPredatorPerception += (anim.genes?.perception || 0.5);
+        } else {
+          herbivoreCount++;
+          herbivoreEnergy += anim.energy;
+          const p = anim.genes?.perception || 0.5;
+          totalHerbivorePerception += p;
+          maxHerbivorePerception = Math.max(maxHerbivorePerception, p);
+          const plantAffinity = anim.genes?.diet?.plant || 0;
+          totalHerbivorePlant += plantAffinity;
+          if (plantAffinity > 0.15) herbivoresWithPlantDiet++;
+          else herbivoresWithoutPlantDiet++;
         }
       });
 
-      totalNeighbors += neighbors;
-      maxNeighbors = Math.max(maxNeighbors, neighbors);
-            // Acumula a energia disponível na população.
-      totalEnergy += anim.energy;
+      const averageHerbivorePerception = herbivoreCount > 0 ? (totalHerbivorePerception / herbivoreCount) : 0;
+      const averagePredatorPerception = carnivoreCount > 0 ? (totalPredatorPerception / carnivoreCount) : 0;
+      const averageHerbivorePlant = herbivoreCount > 0 ? (totalHerbivorePlant / herbivoreCount) : 0;
 
-      // Identifica animais com energia crítica.
-      if (anim.energy < 25) {
-        lowEnergyAnimals++;
-
-        if (anim.isDiseased) {
-          sickLowEnergyAnimals++;
+      const soilStats = {};
+      for (const row of this.grid) {
+        for (const cell of row) {
+          if (!soilStats[cell.biome]) {
+            soilStats[cell.biome] = { cells: 0, totalNitrogen: 0, minNitrogen: Infinity, maxNitrogen: -Infinity };
+          }
+          const stats = soilStats[cell.biome];
+          stats.cells++;
+          stats.totalNitrogen += cell.soilNitrogen;
+          stats.minNitrogen = Math.min(stats.minNitrogen, cell.soilNitrogen);
+          stats.maxNitrogen = Math.max(stats.maxNitrogen, cell.soilNitrogen);
         }
       }
 
-      // Separa herbívoros e carnívoros pelo perfil alimentar.
-      if ((anim.genes.diet?.meat || 0) > 0.45) {
-  carnivoreEnergy += anim.energy;
-  carnivoreCount++;
-
-  // Registra os tamanhos dos carnívoros.
-  const size = anim.genes.size;
-  minCarnivoreSize = Math.min(minCarnivoreSize, size);
-  maxCarnivoreSize = Math.max(maxCarnivoreSize, size);
-  totalCarnivoreSize += size;
-} else {
-        herbivoreEnergy += anim.energy;
-        herbivoreCount++;
-      }
-
-      if (neighbors > 2) animalsAboveTwo++;
-      if (neighbors > 4) animalsAboveFour++;
-    });
-
-    console.log('=== DIAGNÓSTICO DE DENSIDADE ===');
-    console.log('Média de vizinhos:', this.animals.length > 0
-      ? (totalNeighbors / this.animals.length).toFixed(2)
-      : 0);
-    console.log('Máximo de vizinhos:', maxNeighbors);
-    console.log('Animais com mais de 2 vizinhos:', animalsAboveTwo);
-    console.log('Animais com mais de 4 vizinhos:', animalsAboveFour);
-    console.log('População atual:', this.animals.length);
-    console.log('Quantidade de herbívoros:', herbivoreCount);
-    
-console.log('Quantidade de carnívoros:', carnivoreCount);
-console.log('Menor tamanho dos carnívoros:', carnivoreCount > 0 ? minCarnivoreSize.toFixed(2) : 0);
-console.log('Maior tamanho dos carnívoros:', carnivoreCount > 0 ? maxCarnivoreSize.toFixed(2) : 0);
-console.log('Tamanho médio dos carnívoros:', carnivoreCount > 0 ? (totalCarnivoreSize / carnivoreCount).toFixed(2) : 0);
-console.log('Animais doentes:', this.animals.filter(a => a.isDiseased).length);
-
-// Exibe o diagnóstico energético da população.
-console.log('=== DIAGNÓSTICO ENERGÉTICO ===');
-
-console.log('Energia média geral:', this.animals.length > 0
-  ? (totalEnergy / this.animals.length).toFixed(2)
-  : 0);
-
-console.log('Energia média dos herbívoros:', herbivoreCount > 0
-  ? (herbivoreEnergy / herbivoreCount).toFixed(2)
-  : 0);
-
-console.log('Energia média dos carnívoros:', carnivoreCount > 0
-  ? (carnivoreEnergy / carnivoreCount).toFixed(2)
-  : 0);
-
-console.log('Animais com energia abaixo de 25:', lowEnergyAnimals);
-console.log('Doentes com energia abaixo de 25:', sickLowEnergyAnimals);
-// Exibe o diagnóstico acumulado de mortalidade.
-console.log('=== DIAGNÓSTICO DE MORTALIDADE ===');
-console.log('Mortes por falta de energia:', this.animalMetrics.energyDeaths);
-console.log('Mortes por idade:', this.animalMetrics.ageDeaths);
-console.log('Mortes de animais doentes:', this.animalMetrics.sickDeaths);
-console.log('Mortes de animais saudáveis:', this.animalMetrics.healthyDeaths);
-console.log('Mortes de juvenis (menos de 50 ciclos):', this.animalMetrics.juvenileDeaths);
-console.log('Mortes de adultos (50 ciclos ou mais):', this.animalMetrics.adultDeaths);
-
-// Exibe os comportamentos registrados nos últimos 100 ciclos.
-
-// DIAGNÓSTICO TEMPORÁRIO: evolução da percepção visual.
-const herbivoresForVision = this.animals.filter(
-  a => (a.genes.diet?.meat ?? 0) <= 0.45
-);
-
-const carnivoresForVision = this.animals.filter(
-  a => (a.genes.diet?.meat ?? 0) > 0.45
-);
-
-const herbivorePerceptions = herbivoresForVision.map(
-  a => a.genes.perception ?? 0
-);
-
-const predatorPerceptions = carnivoresForVision.map(
-  a => a.genes.perception ?? 0
-);
-
-const averageHerbivorePerception = herbivorePerceptions.length > 0
-  ? herbivorePerceptions.reduce((sum, value) => sum + value, 0) / herbivorePerceptions.length
-  : 0;
-
-const maxHerbivorePerception = herbivorePerceptions.length > 0
-  ? Math.max(...herbivorePerceptions)
-  : 0;
-
-const averagePredatorPerception = predatorPerceptions.length > 0
-  ? predatorPerceptions.reduce((sum, value) => sum + value, 0) / predatorPerceptions.length
-  : 0;
-
-  // Diagnóstico da composição alimentar dos animais classificados como herbívoros.
-const herbivorePlantValues = herbivoresForVision.map(
-  a => a.genes.diet?.plant ?? 0
-);
-
-const averageHerbivorePlant = herbivorePlantValues.length > 0
-  ? herbivorePlantValues.reduce((sum, value) => sum + value, 0) / herbivorePlantValues.length
-  : 0;
-
-const herbivoresWithoutPlantDiet = herbivoresForVision.filter(
-  a => (a.genes.diet?.plant ?? 0) <= 0.20
-).length;
-
-const herbivoresWithPlantDiet = herbivoresForVision.filter(
-  a => (a.genes.diet?.plant ?? 0) > 0.20
-).length;
-
-console.log('Afinidade vegetal média dos herbívoros:', averageHerbivorePlant.toFixed(3));
-console.log('Herbívoros sem busca por plantas:', herbivoresWithoutPlantDiet);
-console.log('Herbívoros aptos a buscar plantas:', herbivoresWithPlantDiet);
-console.log('=== DIAGNÓSTICO DA IA ===');
-console.log('Percepção média dos herbívoros:', averageHerbivorePerception.toFixed(3));
-console.log('Percepção máxima dos herbívoros:', maxHerbivorePerception.toFixed(3));
-console.log('Percepção média dos carnívoros:', averagePredatorPerception.toFixed(3));
-console.log('Eventos de fuga:', this.aiMetrics.fleeEvents);
-console.log('Refeições herbívoras:', this.aiMetrics.herbivoreMeals);
-console.log('Refeições de carcaças:', this.aiMetrics.carcassMeals);
-console.log('Refeições de carcaças por herbívoros:', this.aiMetrics.herbivoreCarcassMeals);
-console.log('Refeições de carcaças por carnívoros:', this.aiMetrics.carnivoreCarcassMeals);
-console.log('Plantas encontradas:', this.aiMetrics.plantTargets);
-console.log('Infecções por príon:', this.aiMetrics.prionInfections);
-console.log('Ataques canibais:', this.aiMetrics.cannibalAttacks);
-console.log('Infecções por superlotação:', this.aiMetrics.crowdInfections);
-console.log('Aproximações de plantas:', this.aiMetrics.plantApproaches);
-console.log('Abates de outras espécies:', this.aiMetrics.otherSpeciesKills);
-console.log('Abates de carnívoros:', this.aiMetrics.carnivorePreyKills);
-console.log('Abates de não carnívoros:', this.aiMetrics.nonCarnivorePreyKills);
-console.log('Seleções de carcaças como alvo:', this.aiMetrics.carcassTargets);
-console.log('Distância média das carcaças:', this.aiMetrics.carcassTargets > 0
-  ? (this.aiMetrics.carcassDistanceTotal / this.aiMetrics.carcassTargets).toFixed(2)
-  : 0);
-console.log('Seleções de carcaças a 18px ou mais:', this.aiMetrics.carcassFarTargets);
-console.log('Maior distância de carcaça:', this.aiMetrics.carcassMaxDistance.toFixed(2));
-console.log('Ciclo:', this.tickCount);
-
-// Reinicia os contadores para o próximo intervalo.
-// DIAGNÓSTICO TEMPORÁRIO: nitrogênio do solo por bioma.
-const soilStats = {};
-
-for (const row of this.grid) {
-  for (const cell of row) {
-    if (!soilStats[cell.biome]) {
-      soilStats[cell.biome] = {
-        cells: 0,
-        totalNitrogen: 0,
-        minNitrogen: Infinity,
-        maxNitrogen: -Infinity
+      this.latestDiagnostics = {
+        tick: this.tickCount,
+        generation: this.generation,
+        vegetation: {
+          living: this.plants.length,
+          reproduced: this.plantMetrics.reproduced,
+          nutrientDeaths: this.plantMetrics.nutrientDeaths,
+          ageDeaths: this.plantMetrics.ageDeaths,
+          floodDeaths: this.plantMetrics.floodDeaths,
+          grazingDeaths: this.plantMetrics.grazingDeaths,
+          growthUpdates: this.plantMetrics.growthUpdates,
+          growthBlocked: this.plantMetrics.growthBlocked
+        },
+        density: {
+          population: this.animals.length,
+          avgNeighbors: this.animals.length > 0 ? (totalNeighbors / this.animals.length).toFixed(2) : 0,
+          maxNeighbors: maxNeighbors,
+          aboveTwo: animalsAboveTwo,
+          aboveFour: animalsAboveFour,
+          herbivoreCount: herbivoreCount,
+          carnivoreCount: carnivoreCount,
+          minCarnivoreSize: carnivoreCount > 0 ? minCarnivoreSize.toFixed(2) : 0,
+          maxCarnivoreSize: carnivoreCount > 0 ? maxCarnivoreSize.toFixed(2) : 0,
+          avgCarnivoreSize: carnivoreCount > 0 ? (totalCarnivoreSize / carnivoreCount).toFixed(2) : 0,
+          diseasedCount: this.animals.filter(a => a.isDiseased).length
+        },
+        energy: {
+          avgGeneral: this.animals.length > 0 ? (totalEnergy / this.animals.length).toFixed(2) : 0,
+          avgHerbivore: herbivoreCount > 0 ? (herbivoreEnergy / herbivoreCount).toFixed(2) : 0,
+          avgCarnivore: carnivoreCount > 0 ? (carnivoreEnergy / carnivoreCount).toFixed(2) : 0,
+          criticalLow: lowEnergyAnimals,
+          criticalLowSick: sickLowEnergyAnimals
+        },
+        mortality: {
+          energyDeaths: this.animalMetrics.energyDeaths,
+          ageDeaths: this.animalMetrics.ageDeaths,
+          sickDeaths: this.animalMetrics.sickDeaths,
+          healthyDeaths: this.animalMetrics.healthyDeaths,
+          juvenileDeaths: this.animalMetrics.juvenileDeaths,
+          adultDeaths: this.animalMetrics.adultDeaths
+        },
+        ai: {
+          avgHerbivorePerception: averageHerbivorePerception.toFixed(3),
+          maxHerbivorePerception: maxHerbivorePerception.toFixed(3),
+          avgPredatorPerception: averagePredatorPerception.toFixed(3),
+          avgHerbivorePlantAffinity: averageHerbivorePlant.toFixed(3),
+          herbivoresWithoutPlantDiet: herbivoresWithoutPlantDiet,
+          herbivoresWithPlantDiet: herbivoresWithPlantDiet,
+          fleeEvents: this.aiMetrics.fleeEvents,
+          herbivoreMeals: this.aiMetrics.herbivoreMeals,
+          carcassMeals: this.aiMetrics.carcassMeals,
+          herbivoreCarcassMeals: this.aiMetrics.herbivoreCarcassMeals,
+          carnivoreCarcassMeals: this.aiMetrics.carnivoreCarcassMeals,
+          plantTargets: this.aiMetrics.plantTargets,
+          plantApproaches: this.aiMetrics.plantApproaches,
+          prionInfections: this.aiMetrics.prionInfections,
+          cannibalAttacks: this.aiMetrics.cannibalAttacks,
+          crowdInfections: this.aiMetrics.crowdInfections,
+          otherSpeciesKills: this.aiMetrics.otherSpeciesKills,
+          carnivorePreyKills: this.aiMetrics.carnivorePreyKills,
+          nonCarnivorePreyKills: this.aiMetrics.nonCarnivorePreyKills,
+          carcassTargets: this.aiMetrics.carcassTargets,
+          avgCarcassDistance: this.aiMetrics.carcassTargets > 0 ? (this.aiMetrics.carcassDistanceTotal / this.aiMetrics.carcassTargets).toFixed(2) : 0,
+          carcassFarTargets: this.aiMetrics.carcassFarTargets,
+          carcassMaxDistance: this.aiMetrics.carcassMaxDistance.toFixed(2)
+        },
+        soil: soilStats
       };
+
+      if (typeof window !== 'undefined' && window.systemConsole) {
+        if (typeof window.systemConsole.onDiagnosticsUpdate === 'function') window.systemConsole.onDiagnosticsUpdate(this.latestDiagnostics);
+      }
+      this.aiMetrics.carcassTargets = 0;
+      this.aiMetrics.carcassDistanceTotal = 0;
+      this.aiMetrics.carcassFarTargets = 0;
+      this.aiMetrics.carcassMaxDistance = 0;
+      this.aiMetrics.fleeEvents = 0;
+      this.aiMetrics.herbivoreMeals = 0;
+      this.aiMetrics.plantTargets = 0;
+      this.aiMetrics.carcassMeals = 0;
+      this.aiMetrics.plantApproaches = 0;
+      this.aiMetrics.prionInfections = 0;
+      this.aiMetrics.crowdInfections = 0;
+      this.aiMetrics.cannibalAttacks = 0;
+      this.aiMetrics.otherSpeciesKills = 0;
+      this.aiMetrics.herbivoreCarcassMeals = 0;
+      this.aiMetrics.carnivoreCarcassMeals = 0;
+      this.aiMetrics.carnivorePreyKills = 0;
+      this.aiMetrics.nonCarnivorePreyKills = 0;
     }
-
-    const stats = soilStats[cell.biome];
-
-    stats.cells++;
-    stats.totalNitrogen += cell.soilNitrogen;
-    stats.minNitrogen = Math.min(stats.minNitrogen, cell.soilNitrogen);
-    stats.maxNitrogen = Math.max(stats.maxNitrogen, cell.soilNitrogen);
-  }
-}
-
-console.log('=== NITROGÊNIO DO SOLO POR BIOMA ===');
-
-for (const [biome, stats] of Object.entries(soilStats)) {
-  console.log(biome, {
-    celulas: stats.cells,
-    media: (stats.totalNitrogen / stats.cells).toFixed(2),
-    minimo: stats.minNitrogen.toFixed(2),
-    maximo: stats.maxNitrogen.toFixed(2)
-  });
-}
-
-// Armazena objeto estruturado para o Console do Sistema (sem necessitar F12)
-this.latestDiagnostics = {
-  tick: this.tickCount,
-  generation: this.generation,
-  vegetation: {
-    living: this.plants.length,
-    reproduced: this.plantMetrics.reproduced,
-    nutrientDeaths: this.plantMetrics.nutrientDeaths,
-    ageDeaths: this.plantMetrics.ageDeaths,
-    floodDeaths: this.plantMetrics.floodDeaths,
-    grazingDeaths: this.plantMetrics.grazingDeaths,
-    growthUpdates: this.plantMetrics.growthUpdates,
-    growthBlocked: this.plantMetrics.growthBlocked
-  },
-  density: {
-    population: this.animals.length,
-    avgNeighbors: this.animals.length > 0 ? (totalNeighbors / this.animals.length).toFixed(2) : 0,
-    maxNeighbors: maxNeighbors,
-    aboveTwo: animalsAboveTwo,
-    aboveFour: animalsAboveFour,
-    herbivoreCount: herbivoreCount,
-    carnivoreCount: carnivoreCount,
-    minCarnivoreSize: carnivoreCount > 0 ? minCarnivoreSize.toFixed(2) : 0,
-    maxCarnivoreSize: carnivoreCount > 0 ? maxCarnivoreSize.toFixed(2) : 0,
-    avgCarnivoreSize: carnivoreCount > 0 ? (totalCarnivoreSize / carnivoreCount).toFixed(2) : 0,
-    diseasedCount: this.animals.filter(a => a.isDiseased).length
-  },
-  energy: {
-    avgGeneral: this.animals.length > 0 ? (totalEnergy / this.animals.length).toFixed(2) : 0,
-    avgHerbivore: herbivoreCount > 0 ? (herbivoreEnergy / herbivoreCount).toFixed(2) : 0,
-    avgCarnivore: carnivoreCount > 0 ? (carnivoreEnergy / carnivoreCount).toFixed(2) : 0,
-    criticalLow: lowEnergyAnimals,
-    criticalLowSick: sickLowEnergyAnimals
-  },
-  mortality: {
-    energyDeaths: this.animalMetrics.energyDeaths,
-    ageDeaths: this.animalMetrics.ageDeaths,
-    sickDeaths: this.animalMetrics.sickDeaths,
-    healthyDeaths: this.animalMetrics.healthyDeaths,
-    juvenileDeaths: this.animalMetrics.juvenileDeaths,
-    adultDeaths: this.animalMetrics.adultDeaths
-  },
-  ai: {
-    avgHerbivorePerception: averageHerbivorePerception.toFixed(3),
-    maxHerbivorePerception: maxHerbivorePerception.toFixed(3),
-    avgPredatorPerception: averagePredatorPerception.toFixed(3),
-    avgHerbivorePlantAffinity: averageHerbivorePlant.toFixed(3),
-    herbivoresWithoutPlantDiet: herbivoresWithoutPlantDiet,
-    herbivoresWithPlantDiet: herbivoresWithPlantDiet,
-    fleeEvents: this.aiMetrics.fleeEvents,
-    herbivoreMeals: this.aiMetrics.herbivoreMeals,
-    carcassMeals: this.aiMetrics.carcassMeals,
-    herbivoreCarcassMeals: this.aiMetrics.herbivoreCarcassMeals,
-    carnivoreCarcassMeals: this.aiMetrics.carnivoreCarcassMeals,
-    plantTargets: this.aiMetrics.plantTargets,
-    plantApproaches: this.aiMetrics.plantApproaches,
-    prionInfections: this.aiMetrics.prionInfections,
-    cannibalAttacks: this.aiMetrics.cannibalAttacks,
-    crowdInfections: this.aiMetrics.crowdInfections,
-    otherSpeciesKills: this.aiMetrics.otherSpeciesKills,
-    carnivorePreyKills: this.aiMetrics.carnivorePreyKills,
-    nonCarnivorePreyKills: this.aiMetrics.nonCarnivorePreyKills,
-    carcassTargets: this.aiMetrics.carcassTargets,
-    avgCarcassDistance: this.aiMetrics.carcassTargets > 0 ? (this.aiMetrics.carcassDistanceTotal / this.aiMetrics.carcassTargets).toFixed(2) : 0,
-    carcassFarTargets: this.aiMetrics.carcassFarTargets,
-    carcassMaxDistance: this.aiMetrics.carcassMaxDistance.toFixed(2)
-  },
-  soil: soilStats
-};
-
-if (typeof window !== 'undefined' && window.systemConsole) {
-  if (typeof window.systemConsole.onDiagnosticsUpdate === 'function') window.systemConsole.onDiagnosticsUpdate(this.latestDiagnostics);
-}
- this.aiMetrics.carcassTargets = 0;
- this.aiMetrics.carcassDistanceTotal = 0;
-this.aiMetrics.carcassFarTargets = 0;
-this.aiMetrics.carcassMaxDistance = 0;
-this.aiMetrics.fleeEvents = 0;
-this.aiMetrics.herbivoreMeals = 0;
-this.aiMetrics.plantTargets = 0;
-this.aiMetrics.carcassMeals = 0;
-this.aiMetrics.plantApproaches = 0;
-this.aiMetrics.prionInfections = 0;
-this.aiMetrics.crowdInfections =0;
-this.aiMetrics.cannibalAttacks= 0;
-this.aiMetrics.otherSpeciesKills= 0;
-this.aiMetrics.herbivoreCarcassMeals = 0;
-this.aiMetrics.carnivoreCarcassMeals = 0;
-this.aiMetrics.carnivorePreyKills = 0;
-this.aiMetrics.nonCarnivorePreyKills = 0;
-
-
-
-  }
 
     if (this.tickCount % this.seasonLength === 0) {
       this.seasonIndex = (this.seasonIndex + 1) % SEASONS.length;
@@ -1183,11 +1962,10 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
       this.recordHistorySnapshot();
     }
 
-    // ── CLIMA DINÂMICO & MEIO EM TRANSIÇÃO ──
     this.climateTrend = -0.00015 * this.generation + Math.sin(this.tickCount * 0.0012) * 0.25;
     const effectiveTemp = curSeason.temp + this.climateTrend;
 
-    // ── HIDROLOGIA DINÂMICA: RIOS SURGINDO E SECANDO ──
+    // Hidrologia dinâmica
     this.hydrologyTimer++;
     if (this.hydrologyTimer >= 90) {
       this.hydrologyTimer = 0;
@@ -1199,7 +1977,6 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
       const cell = this.grid[targetR]?.[targetC];
 
       if (cell) {
-        // Enchentes e transbordamento em épocas de chuva
         if (isWetPeriod && cell.biome === 'fertile' && !isFreezing) {
           let neighborWater = 0;
           [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dr, dc]) => {
@@ -1211,21 +1988,15 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
             cell.maxSoilNitrogen = 0;
             cell.soilNitrogen = 0;
             if (cell.plant) {
-  const pIdx = this.plants.indexOf(cell.plant);
-
-  if (pIdx !== -1) {
-    this.plants.splice(pIdx, 1);
-
-    // Registra a remoção da planta por enchente.
-    this.plantMetrics.floodDeaths++;
-  }
-
-  cell.plant = null;
-}
+              const pIdx = this.plants.indexOf(cell.plant);
+              if (pIdx !== -1) {
+                this.plants.splice(pIdx, 1);
+                this.plantMetrics.floodDeaths++;
+              }
+              cell.plant = null;
+            }
           }
-        }
-        // Seca de rios em épocas quentes
-        else if (!isWetPeriod && cell.biome === 'water' && effectiveTemp > 0.1) {
+        } else if (!isWetPeriod && cell.biome === 'water' && effectiveTemp > 0.1) {
           let neighborDry = 0;
           [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dr, dc]) => {
             const b = this.grid[targetR + dr]?.[targetC + dc]?.biome;
@@ -1234,267 +2005,46 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
           if (neighborDry >= 2 && Math.random() < 0.35) {
             cell.biome = 'fertile';
             cell.moisture = 0.70;
-            cell.maxSoilNitrogen = 120; // Restaura a capacidade fértil do solo
+            cell.maxSoilNitrogen = 120;
             cell.soilNitrogen = 50.0;
           }
         }
       }
     }
 
-    // 1. DINÂMICA DO SOLO & NUTRIENTES
+    // 1. DINÂMICA DO SOLO & NUTRIENTES (POO)
     for (let r = 0; r < this.gridRows; r++) {
       for (let c = 0; c < this.gridCols; c++) {
-        const cell = this.grid[r][c];
-        if (cell.biome !== 'water') {
-          cell.moisture = Math.min(1.0, Math.max(0.12, cell.moisture + 0.02 * curSeason.rain - 0.005));
-
-          if (cell.organicBiomass > 0.05) {
-            const minRate = cell.organicBiomass * 0.04 * cell.moisture;
-            cell.organicBiomass -= minRate;
-            cell.soilNitrogen = Math.min(cell.maxSoilNitrogen, cell.soilNitrogen + minRate * 0.9);
-          } else if (cell.soilNitrogen < cell.maxSoilNitrogen) {
-            cell.soilNitrogen = Math.min(cell.maxSoilNitrogen, cell.soilNitrogen + 0.12 * curSeason.rain);
-          }
-        }
+        this.grid[r][c].regenerate(curSeason);
       }
     }
 
-    // 2. CARCAÇAS
+    // 2. CARCAÇAS (POO)
     for (let idx = this.carcasses.length - 1; idx >= 0; idx--) {
       const carcass = this.carcasses[idx];
       if (!carcass) { this.carcasses.splice(idx, 1); continue; }
-
-      carcass.decayTimer++;
       const cell = this.grid[carcass.r]?.[carcass.c];
-      const decayLoss = 0.20;
-      carcass.remainingEnergy -= decayLoss;
-
-      if (cell) {
-        cell.organicBiomass = Math.min(80.0, cell.organicBiomass + decayLoss * 0.85);
-      }
-
-      if (carcass.remainingEnergy <= 0 || carcass.decayTimer > 250) {
-        if (cell && cell.carcass === carcass) cell.carcass = null;
+      carcass.tick(cell);
+      if (!carcass.alive) {
         this.carcasses.splice(idx, 1);
       }
     }
 
-    // 3. VEGETAIS (Lei de Liebig, Estresse Térmico & Especiação Botânica)
+    // 3. VEGETAIS (POO)
     for (let idx = this.plants.length - 1; idx >= 0; idx--) {
       const plant = this.plants[idx];
-      if (!plant) {
-        this.plants.splice(idx, 1);
-        continue;
-      }
-
-      plant.age++;
+      if (!plant) { this.plants.splice(idx, 1); continue; }
       const cell = this.grid[plant.r]?.[plant.c];
-      if (!cell) {
+      plant.tick(curSeason, cell, this.plantMetrics, this);
+      if (!plant.alive) {
         this.plants.splice(idx, 1);
-        continue;
-      }
-
-      const g = plant.genes || {};
-      const maintenanceCost = 0.02 + ((g.height || 0.5) * 0.02) + ((g.defense || 0.3) * 0.015);
-
-      const tempDiff = Math.abs((g.thermal || 0.0) - curSeason.temp);
-      const thermalPlantFactor = tempDiff > 0.4 ? 1.0 + (tempDiff - 0.4) * 0.6 : 1.0;
-
-      const lightFactor = (curSeason.sunlight * 1.0) / (0.4 + curSeason.sunlight);
-      const nitrogenFactor = cell.soilNitrogen / (10.0 + cell.soilNitrogen);
-      const waterFactor = Math.min(1.0, cell.moisture * (0.7 + (g.rootEfficiency || 0.5) * 0.6));
-      const liebig = Math.min(lightFactor, nitrogenFactor, waterFactor) / thermalPlantFactor;
-
-      // ── LONGEVIDADE E SENESCÊNCIA GENÉTICA ──
-      // Plantas pioneiras/rápidas têm ciclo de vida mais curto (260-380 ticks);
-      // Plantas robustas, altas e espinhosas vivem mais (500-800 ticks), investindo em biomassa perene.
-      const baseLifespan = 320 + ((g.height || 0.5) * 320) + ((g.defense || 0.3) * 180) - ((g.growthSpeed || 0.5) * 140);
-      const plantMaxAge = Math.max(180, Math.round(baseLifespan));
-
-      if (cell.soilNitrogen >= maintenanceCost) {
-        this.plantMetrics.growthUpdates++;
-
-        cell.soilNitrogen -= maintenanceCost;
-        const leafAreaFactor = Math.max(0.20, plant.growth);
-        const growthDelta = 0.016 * leafAreaFactor * (0.5 + (g.growthSpeed || 0.5) * 0.8) * liebig;
-        plant.growth = Math.min(1.0, plant.growth + growthDelta);
-
-        // Fotossíntese revigora energia celular em boas condições ambientais
-        if (liebig > 0.35 && plant.energy < 45.0) {
-          plant.energy = Math.min(45.0, plant.energy + 0.12 * liebig);
-        }
-
-        if (plant.growth >= 0.68) {
-          plant.hasFruit = true;
-          plant.fruitCount = Math.round(1 + (g.fruitAttraction || 0.4) * 4);
-        }
-      } else {
-        this.plantMetrics.growthBlocked++;
-        // Estresse fisiológico por falta de nitrogênio no solo
-        plant.energy -= 0.32 * (1.0 + (g.height || 0.5) * 0.4);
-      }
-
-      // Estresse por seca ou desajuste térmico severo
-      if (liebig < 0.20) {
-        plant.energy -= 0.14;
-      }
-
-      // Senescência avançada: plantas idosas entram em declínio fisiológico
-      if (plant.age > plantMaxAge * 0.85) {
-        plant.energy -= 0.18;
-      }
-
-      // ── MORTALIDADE NATURAL (SENESCÊNCIA OU ESGOTAMENTO NUTRICIONAL) ──
-      if (plant.age >= plantMaxAge || plant.energy <= 0) {
-        if (plant.energy <= 0) {
-          this.plantMetrics.nutrientDeaths++;
-        } else {
-          this.plantMetrics.ageDeaths++;
-        }
-
-        // Ciclagem de matéria orgânica no solo (enriquece o solo para a próxima geração)
-        cell.organicBiomass = Math.min(80.0, cell.organicBiomass + plant.growth * 12.0);
-        cell.soilNitrogen = Math.min(60.0, cell.soilNitrogen + 2.0);
-        if (cell.plant === plant) {
-          cell.plant = null;
-        }
-        this.plants.splice(idx, 1);
-        continue;
-      }
-
-      // ── DISPERSÃO E REPRODUÇÃO SEXUADA COM POLINIZAÇÃO CRUZADA & MUTAÇÃO ──
-      const reproThreshold = 0.015 * (g.growthSpeed || 0.5);
-      if (plant.hasFruit && Math.random() < reproThreshold && this.plants.length < this.gridCols * this.gridRows * 0.70) {
-        const windReach = Math.max(1, Math.round(1 + (g.height || 0.5) * 4));
-        const dr = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
-        const dc = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
-        const nr = plant.r + dr, nc = plant.c + dc;
-
-        if (this.grid[nr]?.[nc] && this.grid[nr][nc].biome !== 'water' && !this.grid[nr][nc].plant) {
-          // Polinização cruzada: busca parceiro fértil próximo (troca de pólen pelo vento/insetos)
-          let partnerGenes = g;
-          const searchRadius = 3;
-          for (let pr = Math.max(0, plant.r - searchRadius); pr <= Math.min(this.gridRows - 1, plant.r + searchRadius); pr++) {
-            for (let pc = Math.max(0, plant.c - searchRadius); pc <= Math.min(this.gridCols - 1, plant.c + searchRadius); pc++) {
-              const other = this.grid[pr]?.[pc]?.plant;
-              if (other && other !== plant && other.hasFruit) {
-                partnerGenes = other.genes || g;
-                break;
-              }
-            }
-            if (partnerGenes !== g) break;
-          }
-
-          const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
-          const childGenes = {};
-          const allGeneKeys = ['height', 'rootEfficiency', 'growthSpeed', 'defense', 'fruitAttraction', 'parasiteResistance', 'thermal', 'colorHue'];
-
-          allGeneKeys.forEach(k => {
-            const geneA = g[k] ?? (k === 'colorHue' ? 110 : (k === 'thermal' ? 0.0 : 0.5));
-            const geneB = partnerGenes[k] ?? geneA;
-            const avg = (geneA + geneB) / 2;
-
-            if (k === 'colorHue') {
-              const hueMut = (Math.random() * 26 - 13) * mutMul;
-              childGenes[k] = Math.round((avg + hueMut + 360) % 360);
-            } else if (k === 'thermal') {
-              const thermMut = (Math.random() * 0.12 - 0.06) * mutMul;
-              childGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, avg + thermMut)).toFixed(2));
-            } else {
-              const genMut = (Math.random() * 0.12 - 0.06) * mutMul;
-              childGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, avg + genMut)).toFixed(2));
-            }
-          });
-
-          const baseName = plant.name;
-          const speciesData = this.speciesRegistry[baseName] || {};
-          const founderGenes = speciesData.founderGenes || g;
-          const rootName = speciesData.rootName || baseName.replace(/\s*(Espinhosa|Indefesa|Gigante|Rasteira|Árida|Aquática|Pioneira|Tardia|Tropical|Boreal)/g, '').trim();
-
-          const speciation = evaluatePlantSpeciation(childGenes, founderGenes);
-          let childSpeciesName = baseName;
-
-          if (speciation.diverged) {
-            childSpeciesName = rootName + ' ' + speciation.desc;
-            const isNew = this.registerSpecies(
-              childSpeciesName,
-              'plant',
-              childGenes,
-              baseName,
-              rootName,
-              speciation.traitName + ' ' + speciation.desc
-            );
-
-            if (isNew && typeof toast === 'function') {
-              toast('🌿 Nova Linhagem Vegetal: "' + childSpeciesName + '" evoluiu por adaptação de ' + speciation.traitName + '!');
-            }
-          }
-
-          const childPlant = {
-            id: 'plant_' + Math.random().toString(36).substr(2, 9),
-            name: childSpeciesName,
-            r: nr, c: nc,
-            x: (nc + 0.5) * this.cellSize,
-            y: (nr + 0.5) * this.cellSize,
-            energy: 36.0,
-            growth: 0.18,
-            hasFruit: false,
-            fruitCount: 0,
-            age: 0,
-            genes: childGenes,
-            customImages: plant.customImages
-          };
-          this.grid[nr][nc].plant = childPlant;
-          this.plants.push(childPlant);
-          this.plantMetrics.reproduced++;
-        }
-      }
-
-      // ── PROPAGAÇÃO VEGETATIVA CLONAL (RIZOMAS / ESTOLÕES) ──
-      if (this.equilibriumSettings?.vegetativeSpreading && plant.growth >= 0.30 && Math.random() < 0.009 * (g.growthSpeed || 0.5) && this.plants.length < this.gridCols * this.gridRows * 0.70) {
-        const deltas = [[1,0], [-1,0], [0,1], [0,-1]];
-        const [dr, dc] = deltas[Math.floor(Math.random() * deltas.length)];
-        const nr = plant.r + dr, nc = plant.c + dc;
-
-        if (this.grid[nr]?.[nc] && this.grid[nr][nc].biome !== 'water' && !this.grid[nr][nc].plant && this.grid[nr][nc].soilNitrogen > 8.0) {
-          const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
-          const cloneGenes = { ...g };
-          // Variação somaclonal sutil
-          if (Math.random() < 0.25 * mutMul) {
-            const keys = ['height', 'defense', 'rootEfficiency', 'growthSpeed', 'colorHue'];
-            const rk = keys[Math.floor(Math.random() * keys.length)];
-            if (rk === 'colorHue') {
-              cloneGenes[rk] = Math.round((cloneGenes[rk] + (Math.random() * 8 - 4) + 360) % 360);
-            } else {
-              cloneGenes[rk] = parseFloat(Math.max(0.05, Math.min(1.0, (cloneGenes[rk] || 0.5) + (Math.random() * 0.06 - 0.03))).toFixed(2));
-            }
-          }
-
-          const clonePlant = {
-            id: 'plant_' + Math.random().toString(36).substr(2, 9),
-            name: plant.name,
-            r: nr, c: nc,
-            x: (nc + 0.5) * this.cellSize,
-            y: (nr + 0.5) * this.cellSize,
-            energy: 28.0,
-            growth: 0.14,
-            hasFruit: false,
-            fruitCount: 0,
-            age: 0,
-            genes: cloneGenes,
-            customImages: plant.customImages
-          };
-          this.grid[nr][nc].plant = clonePlant;
-          this.plants.push(clonePlant);
-          this.plantMetrics.reproduced++;
-        }
       }
     }
 
-    // 3.1 BANCO DE SEMENTES NO SOLO (HOMEOSTASE E SUCESSÃO ECOLÓGICA SECUNDÁRIA)
+    // 3.1 BANCO DE SEMENTES NO SOLO
     const targetPlantCap = this.gridCols * this.gridRows * 0.48;
     const isPlantUnderPressure = this.plants.length < targetPlantCap;
-    const isCriticallyLow = this.plants.length < 35; // Salvaguarda anti-colapso
+    const isCriticallyLow = this.plants.length < 35;
     const baseSeedRate = this.equilibriumSettings?.seedBankRate ?? 0.14;
     const effectiveSeedRate = isCriticallyLow ? 0.95 : (isPlantUnderPressure ? baseSeedRate * 1.6 : baseSeedRate * 0.4);
 
@@ -1529,20 +2079,16 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
             }
           });
 
-          const seedling = {
-            id: 'plant_' + Math.random().toString(36).substr(2, 9),
-            name: templateSpecies ? templateSpecies.name : 'Grama Pioneira',
-            r: randR, c: randC,
-            x: (randC + 0.5) * this.cellSize,
-            y: (randR + 0.5) * this.cellSize,
-            energy: 34.0,
-            growth: 0.18,
-            hasFruit: false,
-            fruitCount: 0,
-            age: 0,
-            genes: seedlingGenes,
-            customImages: templateSpecies?.customImages ? { ...templateSpecies.customImages } : {}
-          };
+          const seedling = new Plant(
+            'plant_' + Math.random().toString(36).substr(2, 9),
+            templateSpecies ? templateSpecies.name : 'Grama Pioneira',
+            randR, randC,
+            this.cellSize,
+            seedlingGenes,
+            templateSpecies?.customImages ? { ...templateSpecies.customImages } : {}
+          );
+          seedling.growth = 0.18;
+          seedling.energy = 34.0;
           candidateCell.plant = seedling;
           this.plants.push(seedling);
           this.plantMetrics.reproduced++;
@@ -1550,224 +2096,12 @@ this.aiMetrics.nonCarnivorePreyKills = 0;
       }
     }
 
-    // 4. FISIOLOGIA ANIMAL & REGULAÇÃO DEPENDENTE DE DENSIDADE
+    // 4. FISIOLOGIA ANIMAL (POO)
     const deadAnimals = [];
     const newOffspring = [];
-    // Contadores temporários para diagnosticar as mortes dos animais.
-
 
     this.animals.forEach(anim => {
-      // ── DECLARAÇÕES E ATUALIZAÇÕES RESTAURADAS ──
-      anim.age++;
-      if (anim.mateCooldown > 0) anim.mateCooldown--;
-      if (anim.attackCooldown > 0) anim.attackCooldown--;
-
-      const g = anim.genes;
-      const curSpeed = Math.hypot(anim.vx || 0, anim.vy || 0);
-
-      const massKg = 5.0 + (g.size || 0.5) * 70.0;
-      const basalMetabolism = 0.06 * Math.pow(massKg / 40.0, 0.75);
-      const locomotionCost = 0.04 * Math.pow(curSpeed / 2.0, 1.5);
-
-      // Reserva de gordura para carnívoros
-      const meatRatio = g.diet?.meat || 0.0;
-      anim.maxEnergy = 100.0 + meatRatio * 80.0;
-
-      // Jejum prolongado para predadores
-      const fastingEfficiency = 1.0 - meatRatio * 0.45;
-
-      const tempDiff = Math.abs((g.thermal || 0.0) - curSeason.temp);
-      const thermalFactor = 1.0 + (tempDiff > 0.4 ? 0.3 : 0.0) * curSeason.thermalCost;
-
-      // Custo total declarado
-      let totalCost = (basalMetabolism * fastingEfficiency + locomotionCost) * thermalFactor;
-
-      // Modificadores de bioma (Água vs Terra)
-      const curR = Math.max(0, Math.min(this.gridRows - 1, Math.floor(anim.y / this.cellSize)));
-      const curC = Math.max(0, Math.min(this.gridCols - 1, Math.floor(anim.x / this.cellSize)));
-      const inWater = this.grid[curR]?.[curC]?.biome === 'water';
-      const aquatic = g.aquatic ?? 0.15;
-
-      if (inWater) {
-        if (aquatic < 0.35) {
-          totalCost += (0.35 - aquatic) * 0.30;
-          anim.vx *= 0.65;
-          anim.vy *= 0.65;
-          anim.stateLabel = 'Nadando com Esforço!';
-        } else {
-          totalCost *= 0.80;
-        }
-      } else {
-        if (aquatic > 0.70) {
-          totalCost += (aquatic - 0.70) * 0.25;
-          anim.vx *= 0.75;
-          anim.vy *= 0.75;
-          anim.stateLabel = 'Rastejando em Terra!';
-        }
-      }
-
-      // (Otimizado: Loop inútil de cortisol O(N^2) removido para ultra performance)
-
-      if (anim.isDiseased) {
-        anim.diseaseTimer--;
-        totalCost += 0.12;
-        if (anim.diseaseTimer <= 0) anim.isDiseased = false;
-      }
-
-      // Gestação e aborto
-      if (anim.isPregnant) {
-        anim.gestationTicks--;
-        totalCost += 0.08;
-
-        if (anim.energy < 22.0) {
-          anim.isPregnant = false;
-          anim.pregnantGenes = null;
-          anim.stateLabel = '⚠️ Aborto por Inanição';
-          if (typeof toast === 'function' && Math.random() < 0.18) {
-            toast(`⚠️ ${anim.name} sofreu aborto espontâneo por falta de comida!`);
-          }
-        } else if (anim.gestationTicks <= 0) {
-          anim.isPregnant = false;
-          const clutch = anim.pregnantClutchSize || 1;
-
-          for (let b = 0; b < clutch; b++) {
-            const babyGenes = anim.pregnantGenes || g;
-            const babySpeed = (0.5 + (babyGenes.speed || 0.5) * 1.5);
-            newOffspring.push({
-              id: 'anim_' + Math.random().toString(36).substr(2, 9),
-              name: anim.pregnantSpeciesName || anim.speciesName,
-              speciesName: anim.pregnantSpeciesName || anim.speciesName,
-              x: Math.max(10, Math.min((this.gridCols * this.cellSize) - 10, anim.x + (Math.random() * 14 - 7))),
-              y: Math.max(10, Math.min((this.gridRows * this.cellSize) - 10, anim.y + (Math.random() * 14 - 7))),
-              vx: (Math.random() - 0.5) * babySpeed,
-              vy: (Math.random() - 0.5) * babySpeed,
-              energy: (babyGenes.diet?.meat || 0) > 0.45 ? 58.0 : 24.0,
-              maxEnergy: 100.0 + (babyGenes.diet?.meat || 0) * 80.0,
-              age: 0,
-              genes: {
-  ...babyGenes,
-  diet: babyGenes.diet ? { ...babyGenes.diet } : undefined
-},
-              customImages: anim.customImages,
-              state: 'wandering',
-              stateLabel: 'Recém-nascido (Frágil)',
-              mateCooldown: 60,
-              attackCooldown: 0,
-              isDiseased: false,
-              diseaseTimer: 0,
-              isPregnant: false,
-              gestationTicks: 0,
-              pregnantGenes: null,
-              pregnantSpeciesName: null,
-              pregnantClutchSize: 1
-            });
-          }
-          anim.pregnantGenes = null;
-          anim.stateLabel = 'Deu à luz!';
-        }
-      }
-
-      if ((g.diet?.meat || 0) > 0.45 && anim.state !== "hunting" && anim.state !== "fleeing") { totalCost *= 0.72; }
-      anim.energy -= totalCost;
-
-     // Identifica o motivo da morte do animal.
-// Verifica se o animal realmente morreu.
-const maxLifespan = (g.diet?.meat || 0) > 0.45 ? (950 + (g.size || 0.5) * 300) : (700 + (g.size || 0.5) * 150);
-if (anim.energy <= 0 || anim.age > maxLifespan) {
-
-// Identifica o motivo da morte.
-if (anim.energy <= 0) {
-  this.animalMetrics.energyDeaths++;
-} else {
-  this.animalMetrics.ageDeaths++;
-}
-
-// Separa mortes juvenis e adultas.
-if (anim.age < 50) {
-  this.animalMetrics.juvenileDeaths++;
-} else {
-  this.animalMetrics.adultDeaths++;
-}
-
-  // Registra se morreu enquanto estava doente.
-  if (anim.isDiseased) {
-    this.animalMetrics.sickDeaths++;
-  } else {
-    this.animalMetrics.healthyDeaths++;
-  }
-
-  deadAnimals.push(anim);
-  return;
-}
-
-      // Executa a IA para buscar alimento, fugir e reproduzir.
-      this.updateAnimalAI(anim, newOffspring);
-
-      anim.x += anim.vx;
-      anim.y += anim.vy;
-
-      // Germinação zoocórica com especiação e dispersão
-      if (anim.carriedSeed) {
-        anim.carriedSeed.dropTimer--;
-        if (anim.carriedSeed.dropTimer <= 0) {
-          const ar = Math.floor(anim.y / this.cellSize);
-          const ac = Math.floor(anim.x / this.cellSize);
-          const targetCell = this.grid[ar]?.[ac];
-
-          if (targetCell && targetCell.biome !== 'water' && !targetCell.plant && this.plants.length < this.gridCols * this.gridRows * 0.70) {
-            const baseName = anim.carriedSeed.speciesName;
-            const speciesData = this.speciesRegistry[baseName] || {};
-            const founderGenes = speciesData.founderGenes || anim.carriedSeed.genes;
-            const rootName = speciesData.rootName || baseName.replace(/\s*(Espinhosa|Indefesa|Gigante|Rasteira|Árida|Aquática|Pioneira|Tardia|Tropical|Boreal)/g, '').trim();
-
-            const speciation = evaluatePlantSpeciation(anim.carriedSeed.genes, founderGenes);
-            let childSpeciesName = baseName;
-
-            if (speciation.diverged) {
-              childSpeciesName = rootName + ' ' + speciation.desc;
-              const isNew = this.registerSpecies(
-                childSpeciesName,
-                'plant',
-                anim.carriedSeed.genes,
-                baseName,
-                rootName,
-                speciation.traitName + ' ' + speciation.desc
-              );
-              if (isNew && typeof toast === 'function') {
-                toast('🌿 Nova Linhagem Vegetal (Zoocoria): "' + childSpeciesName + '" germinou após dispersão animal!');
-              }
-            }
-
-            const seedPlant = {
-              id: 'plant_' + Math.random().toString(36).substr(2, 9),
-              name: childSpeciesName,
-              r: ar, c: ac,
-              x: (ac + 0.5) * this.cellSize,
-              y: (ar + 0.5) * this.cellSize,
-              energy: 40.0,
-              growth: 0.22,
-              hasFruit: false,
-              fruitCount: 0,
-              age: 0,
-              genes: anim.carriedSeed.genes || {},
-              customImages: anim.carriedSeed.customImages || {}
-            };
-            targetCell.plant = seedPlant;
-            targetCell.organicBiomass = Math.min(80.0, targetCell.organicBiomass + 5.0);
-            this.plants.push(seedPlant);
-            this.plantMetrics.reproduced++;
-          }
-          anim.carriedSeed = null;
-        }
-      }
-
-      const margin = 12;
-      const maxX = this.gridCols * this.cellSize - margin;
-      const maxY = this.gridRows * this.cellSize - margin;
-      if (anim.x < margin) { anim.x = margin; anim.vx *= -1; }
-      if (anim.x > maxX)   { anim.x = maxX; anim.vx *= -1; }
-      if (anim.y < margin) { anim.y = margin; anim.vy *= -1; }
-      if (anim.y > maxY)   { anim.y = maxY; anim.vy *= -1; }
+      anim.tick(curSeason, this, newOffspring, deadAnimals);
     });
 
     deadAnimals.forEach(dead => {
@@ -1778,562 +2112,29 @@ if (anim.age < 50) {
         const cc = Math.max(0, Math.min(this.gridCols - 1, Math.floor(dead.x / this.cellSize)));
 
         if (this.grid[cr]?.[cc]) {
-          // Presas abatidas reservam 35% da energia para a carcaça.
-// Mortes naturais continuam usando o cálculo anterior.
-const carcassEnergy = dead.carcassEnergy ??
-  (25.0 + (dead.genes.size || 0.5) * 50.0);
-          const carcass = {
-            id: 'carcass_' + Math.random().toString(36).substr(2, 9),
-            speciesName: dead.speciesName || dead.name,
-            x: Math.max(10, Math.min((this.gridCols * this.cellSize) - 10, dead.x)),
-            y: Math.max(10, Math.min((this.gridRows * this.cellSize) - 10, dead.y)),
-            r: cr, c: cc,
-            remainingEnergy: carcassEnergy,
-            decayTimer: 0
-          };
+          const carcassEnergy = dead.carcassEnergy ?? (25.0 + (dead.genes.size || 0.5) * 50.0);
+          const carcass = new Carcass(
+            'carcass_' + Math.random().toString(36).substr(2, 9),
+            dead.speciesName || dead.name,
+            Math.max(10, Math.min((this.gridCols * this.cellSize) - 10, dead.x)),
+            Math.max(10, Math.min((this.gridRows * this.cellSize) - 10, dead.y)),
+            cr, cc,
+            carcassEnergy,
+            dead.genes
+          );
           this.grid[cr][cc].carcass = carcass;
           this.carcasses.push(carcass);
         }
       }
     });
 
-   // Adiciona os filhotes sem ultrapassar o limite populacional.
-const availableSlots = Math.max(
-  0,
-  HARD_CRASH_FAILSAFE - this.animals.length
-);
-
-// Adiciona somente a quantidade de filhotes que cabe na população.
-newOffspring.slice(0, availableSlots).forEach(baby => {
-  this.animals.push(baby);
-});
+    const availableSlots = Math.max(0, HARD_CRASH_FAILSAFE - this.animals.length);
+    newOffspring.slice(0, availableSlots).forEach(baby => {
+      this.animals.push(baby);
+    });
 
     if (this.animals.length === 0 && this.tickCount > 10) {
       this.handleExtinction();
-    }
-  }
-
- updateAnimalAI(anim, newOffspring) {
-    const g = anim.genes;
-    const isCarnivore = (g.diet?.meat || 0) > 0.45;
-
-    // Carnívoros famintos ampliam a área de busca/faro em até 50%
-    const hungerRatio = Math.max(0, 1.0 - (anim.energy / anim.maxEnergy));
-    const hungerVisionBonus = isCarnivore ? (1.0 + hungerRatio * 0.5) : 1.0;
-    const viewDist = (45 + g.perception * 130) * (isCarnivore ? 1.4 : 1.0) * hungerVisionBonus;
-
-    const speedPenalty = anim.isDiseased ? 0.65 : (anim.isPregnant ? 0.82 : 1.0);
-    const curR = Math.max(0, Math.min(this.gridRows - 1, Math.floor(anim.y / this.cellSize)));
-    const curC = Math.max(0, Math.min(this.gridCols - 1, Math.floor(anim.x / this.cellSize)));
-    const inWater = this.grid[curR]?.[curC]?.biome === 'water';
-    const aquatic = g.aquatic ?? 0.15;
-
-    // Modificador de velocidade conforme adaptação anatômica
-    const terrainSpeedFactor = inWater
-      ? (0.30 + aquatic * 0.90)   // De 30% (terrestre) até 120% (nadador ágil)
-      : (1.10 - aquatic * 0.55);  // De 110% (terrestre) até 55% (nadador em terra)
-
-    const maxSpeed = (0.7 + g.speed * 2.2) * speedPenalty * terrainSpeedFactor;
-
-    let targetX = null, targetY = null;
-    let desiredSpeed = maxSpeed * 0.45;
-    anim.stateLabel = anim.isDiseased
-      ? `☣️ Infectado (${anim.diseaseTimer}t)`
-      : (anim.isPregnant ? `🤰 Gestante (${anim.gestationTicks}t)` : 'Forrageando');
-
-    // 1. Fuga de Predadores adaptativa (Seleção Natural para Percepção e Velocidade)
-    if (!isCarnivore) {
-      const fleePerceptionBonus = (g.perception ?? 0.5) * 60.0 * (this.equilibriumSettings?.fleePerceptionFactor ?? 1.0);
-      const maxFleeDist = Math.min(viewDist, 32.0 + fleePerceptionBonus); // Presas atentas detectam a até 92px!
-      let threat = null, minTDist = maxFleeDist;
-      this.animals.forEach(other => {
-        if (other !== anim && (other.genes.diet?.meat || 0) > 0.45 && other.genes.size > g.size * 1.1) {
-          const d = Math.hypot(other.x - anim.x, other.y - anim.y);
-          if (d < minTDist) { minTDist = d; threat = other; }
-        }
-      });
-
-      if (threat) {
-        this.aiMetrics.fleeEvents++;
-        anim.state = 'fleeing';
-        anim.stateLabel = 'Fugindo de Predador!';
-        
-        // Fadiga de fuga da presa: correr sem parar consome fôlego
-        anim.fleeTicks = (anim.fleeTicks || 0) + 1;
-        const fatigue = anim.fleeTicks > 40 ? Math.max(0.68, 1.0 - (anim.fleeTicks - 40) * 0.012) : 1.0;
-        desiredSpeed = maxSpeed * fatigue;
-        
-        const angle = Math.atan2(anim.y - threat.y, anim.x - threat.x);
-        // Suavização direcional da presa (impede teletransporte instantâneo de vetor)
-        anim.vx = anim.vx * 0.50 + Math.cos(angle) * desiredSpeed * 0.50;
-        anim.vy = anim.vy * 0.50 + Math.sin(angle) * desiredSpeed * 0.50;
-        return;
-      } else if (anim.fleeTicks > 0) {
-        anim.fleeTicks = Math.max(0, anim.fleeTicks - 2);
-      }
-    }
-
-    // 2. Busca por Alimento
-    const hungerThreshold = isCarnivore ? (anim.maxEnergy * (this.equilibriumSettings?.predatorSatietyThreshold ?? 0.75)) : 85.0;
-    if (anim.energy < hungerThreshold) {
-      // A. Necrofagia
-      // Herbívoros só buscam carcaças em desespero extremo (energia < 20).
-      // Carnívoros buscam carcaças normalmente (energia < 85).
-      const carcassHungerThreshold = isCarnivore ? 85.0 : 20.0;
-      if ((g.diet?.carcass || 0) > 0.08 && anim.energy < carcassHungerThreshold) {
-        // Só considera carcaças que já estejam próximas o suficiente para alimentação.
-let bestCarcass = null, minCDist = Math.min(viewDist, 17.99);
-        this.carcasses.forEach(c => {
-          if (!c || c.remainingEnergy <= 0) return;
-
-          const isConspecificCarcass = (c.speciesName === anim.speciesName);
-          // Herbívoros NUNCA comem carcaças conspecíficas (repulsa instintiva).
-          // Carnívoros evitam carcaças conspecíficas quando têm energia suficiente.
-          if (isConspecificCarcass && (!isCarnivore || anim.energy >= 25.0)) return;
-
-          const d = Math.hypot(c.x - anim.x, c.y - anim.y);
-          if (d < minCDist) { minCDist = d; bestCarcass = c; }
-        });
-
-        if (bestCarcass) {
-          this.aiMetrics.carcassTargets++;
-          this.aiMetrics.carcassDistanceTotal += minCDist;
-if (minCDist >= 18) this.aiMetrics.carcassFarTargets++;
-this.aiMetrics.carcassMaxDistance = Math.max(this.aiMetrics.carcassMaxDistance, minCDist);
-          targetX = bestCarcass.x;
-          targetY = bestCarcass.y;
-          desiredSpeed = maxSpeed * 0.7;
-          anim.stateLabel = 'Comendo Carcaça';
-
-          if (minCDist < 18) {
-  this.aiMetrics.carcassMeals++;
-
-  // Separa as refeições de carcaças por tipo de animal.
-  if (isCarnivore) {
-    this.aiMetrics.carnivoreCarcassMeals++;
-  } else {
-    this.aiMetrics.herbivoreCarcassMeals++;
-  }
-
-  anim.vx *= 0.1; anim.vy *= 0.1;
-            const bite = Math.min(bestCarcass.remainingEnergy, 4.0);
-            bestCarcass.remainingEnergy -= bite;
-
-            if (bestCarcass.speciesName === anim.speciesName) {
-              this.aiMetrics.prionInfections++;
-              anim.isDiseased = true;
-              anim.diseaseTimer = Math.min(320, (anim.diseaseTimer || 0) + 180);
-              anim.stateLabel = '☣️ Canibalismo (Infectado por Príon!)';
-              if (typeof toast === 'function' && Math.random() < 0.25) {
-                toast(`☣️ ${anim.name} contraiu Príon por necro-canibalismo!`);
-              }
-            }
-
-            // Converte 80% da energia consumida em energia aproveitável.
-const absorbedEnergy = bite * 0.80;
-
-anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
-            return;
-          }
-        }
-      }
-
-      // B. Predação (com saciedade para evitar super-predação em cascata)
-      // B. Predação (com saciedade para evitar super-predação em cascata)
-      const satietyThreshold = anim.maxEnergy * (this.equilibriumSettings?.predatorSatietyThreshold ?? 0.65);
-      const isCarnivoreAgent = (g.diet?.meat || 0) > 0.45;
-      const isHungryCarnivore = isCarnivoreAgent && !targetX && anim.energy < satietyThreshold;
-
-      if (isHungryCarnivore) {
-        // Carnívoros caçam presas conforme tamanho e agressividade
-        const sizeAdvantage = 1.15 + (g.aggression || 0.3) * 0.6;
-        let bestPrey = null, minPDist = viewDist;
-        let bestPreyScore = Infinity;
-
-        this.animals.forEach(other => {
-          if (other === anim) return;
-          if (other.energy <= 0) return;
-          if (other.genes.size > g.size * sizeAdvantage) return;
-
-          // ✅ 1. Calcula a distância 'd' PRIMEIRO:
-          const d = Math.hypot(other.x - anim.x, other.y - anim.y);
-          if (d >= viewDist) return;
-
-          // ✅ 2. Usa o cache trófico _herbivores (evita travar a CPU):
-          const totalPreyCount = this._herbivores ? this._herbivores.length : 30;
-          if (totalPreyCount < 30 && d > 45) return;
-
-          const isSameSpecies = (other.speciesName === anim.speciesName);
-          if (isSameSpecies && anim.energy >= 30.0) return;
-          if ((other.genes.diet?.meat || 0) > 0.45 && other.genes.size > g.size * 1.05) return;
-
-          // Prefere presas mais próximas e mais fatigadas/fracas
-          const preyEnergyRatio = (other.energy || 0) / (other.maxEnergy || 100);
-          const score = d + preyEnergyRatio * 40;
-          if (score < bestPreyScore) { 
-            bestPreyScore = score; 
-            minPDist = d; 
-            bestPrey = other; 
-          }
-        });
-
-        if (bestPrey) {
-          // Continua o restante do código normalmente...
-          targetX = bestPrey.x;
-          targetY = bestPrey.y;
-
-          // BOTE / ARRANCADA (Sprint Burst): quando se aproxima a menos de 80px, dispara em arrancada
-          const isPouncing = minPDist < 80;
-          const sprintBoost = isPouncing 
-            ? (1.38 + (g.speed || 0.5) * 0.22 + (g.aggression || 0.5) * 0.20) // Arrancada fatal: 1.4x a 1.7x!
-            : 1.15; // Perseguição inicial firme
-
-          desiredSpeed = maxSpeed * sprintBoost;
-          anim.state = 'hunting';
-          anim.stateLabel = isPouncing 
-            ? `⚡ Bote em ${bestPrey.name}!` 
-            : `🎯 Caçando ${bestPrey.name}`;
-
-          // Manobra mais precisa e agressiva do predador focado na presa
-          const angleToPrey = Math.atan2(targetY - anim.y, targetX - anim.x);
-          anim.vx = anim.vx * 0.30 + Math.cos(angleToPrey) * desiredSpeed * 0.70;
-          anim.vy = anim.vy * 0.30 + Math.sin(angleToPrey) * desiredSpeed * 0.70;
-
-          // Raio de alcance do ataque
-          const attackRange = 22 + (g.size || 0.5) * 26;
-          if (minPDist < attackRange && anim.attackCooldown === 0) {
-            anim.vx *= 0.1; anim.vy *= 0.1;
-            const preyEnergy = Math.max(0, bestPrey.energy || 0);
-
-            // Abate consumado
-            bestPrey.carcassEnergy = preyEnergy * 0.25;
-            bestPrey.energy = 0;
-
-            if (bestPrey.speciesName === anim.speciesName) {
-              this.aiMetrics.cannibalAttacks++;
-              anim.isDiseased = true;
-              anim.diseaseTimer = Math.min(350, (anim.diseaseTimer || 0) + 240);
-              anim.stateLabel = '☣️ Canibalismo (Infectado por Príon!)';
-              if (typeof toast === 'function') {
-                toast(`☣️ Alerta: ${anim.name} cometeu canibalismo e contraiu Príon letal!`);
-              }
-            } else {
-              this.aiMetrics.otherSpeciesKills++;
-              if ((bestPrey.genes.diet?.meat || 0) > 0.45) {
-                this.aiMetrics.carnivorePreyKills++;
-              } else {
-                this.aiMetrics.nonCarnivorePreyKills++;
-              }
-            }
-
-            // BANQUETE NUTRITIVO REALISTA: A presa fornece biomassa garantida pelo seu porte físico!
-            // Garante que o predador fique bem alimentado e com energia para viver e procriar.
-            const preyMeatBiomass = 45.0 + (bestPrey.genes.size || 0.5) * 55.0;
-            const mealCalories = Math.max(preyMeatBiomass, preyEnergy * 0.85);
-            anim.energy = Math.min(anim.maxEnergy, anim.energy + mealCalories);
-            anim.attackCooldown = 35; // Cooldown ágil para não ficar travado
-            anim.stateLabel = `🍖 Banquete: abateu ${bestPrey.name}`;
-            return;
-          }
-          return;
-        }
-      }
-      
-      // C. Herbivoria & MECANISMO 3: SOBREPASTOREIO (OVERGRAZING) COM PRESSÃO COEVOLUTIVA
-      if ((g.diet?.plant || 0) > 0.20 && !targetX) {
-        let bestPlant = null, minPlDist = viewDist;
-        this.plants.forEach(pl => {
-          if (pl.growth > 0.10) {
-            const d = Math.hypot(pl.x - anim.x, pl.y - anim.y);
-            if (d < minPlDist) { minPlDist = d; bestPlant = pl; }
-          }
-        });
-
-        if (bestPlant) {
-          this.aiMetrics.plantTargets = (this.aiMetrics.plantTargets || 0) + 1;
-          targetX = bestPlant.x;
-          targetY = bestPlant.y;
-          desiredSpeed = maxSpeed * 0.65;
-          anim.stateLabel = 'Pastando';
-
-          if (minPlDist < 16) {
-            this.aiMetrics.plantApproaches++;
-            this.aiMetrics.herbivoreMeals++;
-            anim.vx *= 0.1; anim.vy *= 0.1;
-
-            // PRESSÃO COEVOLUTIVA: Espinhos/toxinas (defense) reduzem a mordida e machucam o herbívoro
-            const plantDef = bestPlant.genes?.defense || 0;
-            const defenseFactor = Math.max(0.18, 1.0 - plantDef * 0.75);
-            const biteAmount = Math.min(bestPlant.growth * 0.65, 0.30) * defenseFactor;
-
-            // Defesas ativas ferem o herbívoro
-            if (plantDef > 0.40) {
-              const thornDamage = (plantDef - 0.40) * 14.0;
-              anim.energy = Math.max(1.0, anim.energy - thornDamage);
-              anim.stateLabel = 'Repelido por Espinhos/Toxina!';
-            }
-
-            // Ganho calórico do herbívoro
-            const calories = (Math.max(0.06, biteAmount) / 0.20) * (bestPlant.hasFruit ? 26.0 : 18.0);
-            const absorbedEnergy = calories * 0.85;
-            anim.energy = Math.min(anim.maxEnergy, anim.energy + absorbedEnergy);
-
-            // A planta perde energia proporcional à desfoliação
-            bestPlant.energy -= biteAmount * 16.0;
-
-            // ZOOCORIA: Fruto consumido gera semente fecundada no trato digestivo com mutação
-            if (bestPlant.hasFruit && Math.random() < (bestPlant.genes?.fruitAttraction || 0.4)) {
-              const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
-              const seedGenes = {};
-              const bg = bestPlant.genes || {};
-              const allGeneKeys = ['height', 'rootEfficiency', 'growthSpeed', 'defense', 'fruitAttraction', 'parasiteResistance', 'thermal', 'colorHue'];
-
-              allGeneKeys.forEach(k => {
-                const val = bg[k] ?? (k === 'colorHue' ? 110 : (k === 'thermal' ? 0.0 : 0.5));
-                if (k === 'colorHue') {
-                  seedGenes[k] = Math.round((val + (Math.random() * 26 - 13) * mutMul + 360) % 360);
-                } else if (k === 'thermal') {
-                  seedGenes[k] = parseFloat(Math.max(-1.0, Math.min(1.0, val + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2));
-                } else {
-                  seedGenes[k] = parseFloat(Math.max(0.05, Math.min(1.0, val + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2));
-                }
-              });
-
-              anim.carriedSeed = {
-                speciesName: bestPlant.name,
-                genes: seedGenes,
-                customImages: bestPlant.customImages,
-                dropTimer: Math.round(20 + Math.random() * 35)
-              };
-            }
-
-            // SOBREVIVÊNCIA E RESILIÊNCIA AO PASTOREIO (Overgrazing)
-            const remainingGrowth = bestPlant.growth - biteAmount;
-            if (remainingGrowth < 0.08 || bestPlant.energy <= 4.0) {
-              const cell = this.grid[bestPlant.r]?.[bestPlant.c];
-              if (cell && cell.plant === bestPlant) cell.plant = null;
-              this.plantMetrics.grazingDeaths++;
-              if (cell) {
-                const remainingBiomass = Math.max(0, remainingGrowth) * 8.0;
-                cell.organicBiomass = Math.min(80.0, cell.organicBiomass + remainingBiomass);
-              }
-
-              const pIdx = this.plants.indexOf(bestPlant);
-              if (pIdx !== -1) this.plants.splice(pIdx, 1);
-              anim.stateLabel = 'Arrancou raiz (Overgrazing)!';
-            } else {
-              // A planta fica podada e preserva a raiz para rebrotar com vigor
-              bestPlant.growth = Math.max(0.06, remainingGrowth);
-              bestPlant.hasFruit = false;
-            }
-            return;
-          }
-        }
-      }
-    }
-
-        // 3. REPRODUÇÃO SEXUADA COM INÍCIO DE GESTAÇÃO (Desacoplamento por Nível Trófico)
-    let totalCarnivores = 0;
-    let totalHerbivores = 0;
-    for (let i = 0; i < this.animals.length; i++) {
-      if ((this.animals[i].genes?.diet?.meat || 0) > 0.45) totalCarnivores++;
-      else totalHerbivores++;
-    }
-
-    const preyPerPredator = totalCarnivores > 0 ? (totalHerbivores / totalCarnivores) : 20.0;
-
-    let reproductionFactor;
-    if (isCarnivore) {
-      // CARNÍVOROS (Regulação Lotka-Volterra por razão presa/predador):
-      // Um ecossistema saudável mantém ~8 a 20 presas por predador.
-      if (totalCarnivores < 4) {
-        // População crítica: esforço de sobrevivência se houver presas mínimas
-        reproductionFactor = totalHerbivores >= 8 ? 1.8 : 0.2;
-      } else if (preyPerPredator < 5.0 || totalCarnivores >= 40) {
-        // Superpredação ou saturação de carnívoros: trava natalidade de predadores
-        reproductionFactor = 0.02;
-      } else if (preyPerPredator < 8.0) {
-        reproductionFactor = 0.25;
-      } else if (totalCarnivores < 18) {
-        reproductionFactor = 1.25;
-      } else {
-        reproductionFactor = 0.65;
-      }
-    } else {
-      // HERBÍVOROS: Alta recuperação quando caem abaixo de 80
-      reproductionFactor = totalHerbivores < 80
-        ? 1.85
-        : totalHerbivores < 260
-          ? 1.15
-          : totalHerbivores >= 400
-            ? 0.0
-            : 1.0 - ((totalHerbivores - 260) / 140);
-    }
-
-    const canStartReproduction = Math.random() < reproductionFactor;
-    const reproEnergyThreshold = isCarnivore 
-      ? (totalCarnivores < 20 ? 75.0 : 90.0)
-      : 68.0;
-
-    if (
-      canStartReproduction &&
-      anim.energy > reproEnergyThreshold &&
-      anim.age > 45 &&
-      anim.mateCooldown === 0 &&
-      !anim.isDiseased &&
-      !anim.isPregnant
-    ) {
-      // Carnívoros usam faro e uivos de longo alcance para rastrear parceiros no território
-      const mateSearchRadius = isCarnivore 
-        ? Math.max(viewDist * 4.0, 750) 
-        : (viewDist * 1.2);
-      let bestMate = null, minMDist = mateSearchRadius;
-
-      this.animals.forEach(other => {
-        const otherIsCarnivore = (other.genes.diet?.meat || 0) > 0.45;
-        const otherReproThreshold = otherIsCarnivore 
-          ? (totalCarnivores < 20 ? 70.0 : 85.0) 
-          : 65.0;
-        if (other === anim || other.energy <= otherReproThreshold * 0.85 || other.mateCooldown > 0 || other.isDiseased || other.isPregnant) return;
-
-const genDist = getGeneticDistance(anim.genes, other.genes);
-        let isCompatible = false;
-
-        if (other.speciesName === anim.speciesName) {
-          isCompatible = true;
-        } else if (genDist < 0.14) {
-          isCompatible = true;
-        }
-
-        if (genDist >= 0.28) {
-          isCompatible = false;
-        }
-
-        if (isCompatible) {
-          const d = Math.hypot(other.x - anim.x, other.y - anim.y);
-          if (d < minMDist) { minMDist = d; bestMate = other; }
-        }
-      });
-
-      if (bestMate) {
-        targetX = bestMate.x;
-        targetY = bestMate.y;
-        desiredSpeed = maxSpeed * 0.85;
-        anim.stateLabel = 'Buscando Parceiro';
-
-        if (minMDist < 16) {
-          anim.vx *= 0.1; anim.vy *= 0.1;
-          // Custo de reprodução: carnívoros gastam mais, herbívoros menos (facilita recuperação)
-          const mateCost = isCarnivore ? 24.0 : 16.0;
-          anim.energy -= mateCost;
-          bestMate.energy -= mateCost;
-
-          anim.mateCooldown = 110;
-          bestMate.mateCooldown = 110;
-
-          const baseSpecies = anim.speciesName;
-          const speciesData = this.speciesRegistry[baseSpecies] || {};
-          const founderGenes = speciesData.founderGenes || g;
-          const rootName = speciesData.rootName || baseSpecies.replace(/\s*(Gigante|Pigmeu|Tropical|Polar|Veloz|Robusto|Predador|Herbívoro)/g, '').trim();
-
-                    const childGenes = {};
-
-          // Reúne os genes presentes nos dois progenitores.
-          const allGeneKeys = new Set([
-            ...Object.keys(g),
-            ...Object.keys(bestMate.genes)
-          ]);
-
-          allGeneKeys.forEach(k => {
-            if (k === 'diet') {
-              const dietA = g.diet || {};
-              const dietB = bestMate.genes.diet || {};
-
-              const avgDiet = {
-                meat: ((dietA.meat ?? 0.05) + (dietB.meat ?? 0.05)) / 2,
-                plant: ((dietA.plant ?? 0.85) + (dietB.plant ?? 0.85)) / 2,
-                carcass: ((dietA.carcass ?? 0.10) + (dietB.carcass ?? 0.10)) / 2,
-              };
-
-              childGenes.diet = mutateAndNormalizeDiet(avgDiet);
-            } else {
-              // Calcula a média dos genes dos dois progenitores.
-              const geneA = g[k] ?? bestMate.genes[k] ?? 0.5;
-              const geneB = bestMate.genes[k] ?? g[k] ?? 0.5;
-              const avg = (geneA + geneB) / 2;
-
-              const mutMul = this.equilibriumSettings?.mutationRateMultiplier ?? 1.0;
-              if (k === 'colorHue') {
-                childGenes[k] = Math.round((avg + (Math.random() * 20 - 10) * mutMul + 360) % 360);
-              } else if (k === 'thermal') {
-                childGenes[k] = parseFloat(
-                  Math.max(-1.0, Math.min(1.0, avg + (Math.random() * 0.1 - 0.05) * mutMul)).toFixed(2)
-                );
-              } else {
-                childGenes[k] = parseFloat(
-                  Math.max(0.05, Math.min(1.0, avg + (Math.random() * 0.12 - 0.06) * mutMul)).toFixed(2)
-                );
-              }
-            }
-          });
-          const speciationCheck = evaluateSpeciation(childGenes, founderGenes);
-          let finalSpeciesName = baseSpecies;
-
-          if (speciationCheck.diverged) {
-            finalSpeciesName = `${rootName} ${speciationCheck.desc}`;
-            const isNew = this.registerSpecies(
-              finalSpeciesName,
-              'animal',
-              childGenes,
-              baseSpecies,
-              rootName,
-              speciationCheck.traitName + ' ' + speciationCheck.desc
-            );
-
-            if (isNew && typeof toast === 'function') {
-              toast(`🧬 Nova Espécie: "${finalSpeciesName}" surgiu por adaptação de ${speciationCheck.traitName}!`);
-            }
-          }
-
-          const gestA = g.gestation ?? 0.45;
-          const gestB = bestMate.genes?.gestation ?? 0.45;
-          const offA = g.offspringCount ?? 0.45;
-          const offB = bestMate.genes?.offspringCount ?? 0.45;
-
-          let clutchSize;
-          if (isCarnivore) {
-            clutchSize = totalCarnivores < 20 ? 3 : (totalCarnivores < 40 ? 2 : (Math.random() < ((offA + offB) / 2) ? 2 : 1));
-          } else {
-            clutchSize = Math.random() < ((offA + offB) / 2) ? 2 : 1;
-          }
-          if (speciationCheck.diverged && clutchSize < 2) clutchSize = 2;
-
-          anim.isPregnant = true;
-          const gestFactor = (isCarnivore && totalCarnivores < 20) ? 0.70 : 1.0;
-          anim.gestationTicks = Math.max(15, Math.round((28 + ((gestA + gestB) / 2) * 35) * gestFactor));
-          anim.pregnantGenes = childGenes;
-          anim.pregnantSpeciesName = finalSpeciesName;
-          anim.pregnantClutchSize = clutchSize;
-          anim.stateLabel = 'Iniciou Gestação';
-
-          const mateCooldownVal = (isCarnivore && totalCarnivores < 20) ? 45 : 85;
-          anim.mateCooldown = mateCooldownVal;
-          bestMate.mateCooldown = mateCooldownVal;
-          return;
-        }
-      }
-    }
-
-    if (targetX !== null && targetY !== null) {
-      const angle = Math.atan2(targetY - anim.y, targetX - anim.x);
-      anim.vx = anim.vx * 0.55 + Math.cos(angle) * desiredSpeed * 0.45;
-      anim.vy = anim.vy * 0.55 + Math.sin(angle) * desiredSpeed * 0.45;
-    } else {
-      if (Math.random() < 0.07) {
-        const randAngle = Math.random() * Math.PI * 2;
-        anim.vx = Math.cos(randAngle) * desiredSpeed;
-        anim.vy = Math.sin(randAngle) * desiredSpeed;
-      }
     }
   }
 
@@ -2347,110 +2148,50 @@ const genDist = getGeneticDistance(anim.genes, other.genes);
     }
   }
 
+  reinjectPioneers(count = 18) {
+    if (!Number.isFinite(count) || count <= 0) return;
+    const speciesList = this.worldConfig?.speciesCounts?.animals;
 
-reinjectPioneers(count = 18) {
-  // Impede a reinjeção quando a quantidade solicitada é inválida.
-  if (!Number.isFinite(count) || count <= 0) return;
+    if (speciesList && speciesList.length > 0) {
+      const availableSpecies = speciesList.filter(sp => sp && sp.name && sp.genes);
+      if (availableSpecies.length === 0) return;
+      const baseCount = Math.floor(count / availableSpecies.length);
+      const remainder = count % availableSpecies.length;
 
-  // Recupera as espécies configuradas para o mundo.
-  const speciesList = this.worldConfig?.speciesCounts?.animals;
+      availableSpecies.forEach((sp, index) => {
+        const amount = baseCount + (index < remainder ? 1 : 0);
+        this.spawnSpeciesInClusters(sp.name, sp.genes, sp.customImages || {}, amount);
+      });
+      return;
+    }
 
-  // Se existem espécies configuradas, utiliza seus dados genéticos.
-  if (speciesList && speciesList.length > 0) {
-    const availableSpecies = speciesList.filter(sp => 
-      sp && sp.name && sp.genes
-    );
+    const savedAnimals = JSON.parse(localStorage.getItem('evo_animals') || '[]');
+    if (savedAnimals.length > 0) {
+      const baseCount = Math.floor(count / savedAnimals.length);
+      const remainder = count % savedAnimals.length;
+      savedAnimals.forEach((sp, index) => {
+        const amount = baseCount + (index < remainder ? 1 : 0);
+        this.spawnSpeciesInClusters(sp.name, sp.genes, sp.customImages || {}, amount);
+      });
+      return;
+    }
 
-    // Não há espécies válidas para reintroduzir.
-    if (availableSpecies.length === 0) return;
+    const predCount = Math.max(1, Math.round(count * 0.25));
+    const herbCount = count - predCount;
+    const herbGenes = {
+      size: 0.35, diet: { meat: 0.0, plant: 0.90, carcass: 0.10 },
+      speed: 0.60, perception: 0.65, gestation: 0.30, offspringCount: 0.70,
+      aggression: 0.10, health: 0.60, thermal: 0.0, colorHue: 125
+    };
+    const predGenes = {
+      size: 0.65, diet: { meat: 0.85, plant: 0.05, carcass: 0.10 },
+      speed: 0.70, perception: 0.80, gestation: 0.50, offspringCount: 0.35,
+      aggression: 0.75, health: 0.60, thermal: 0.0, colorHue: 15
+    };
 
-    // Distribui a quantidade solicitada entre as espécies disponíveis.
-    const baseCount = Math.floor(count / availableSpecies.length);
-    const remainder = count % availableSpecies.length;
-
-    availableSpecies.forEach((sp, index) => {
-      const amount = baseCount + (index < remainder ? 1 : 0);
-
-      // Adiciona os animais sem limpar a população existente.
-      this.spawnSpeciesInClusters(
-        sp.name,
-        sp.genes,
-        sp.customImages || {},
-        amount
-      );
-    });
-
-    return;
+    this.spawnSpeciesInClusters('Herbívoro Campestre', herbGenes, {}, herbCount);
+    this.spawnSpeciesInClusters('Predador Alfa', predGenes, {}, predCount);
   }
-
-  // Se não houver espécies configuradas, utiliza as espécies salvas.
-  const savedAnimals = JSON.parse(
-    localStorage.getItem('evo_animals') || '[]'
-  );
-
-  if (savedAnimals.length > 0) {
-    const baseCount = Math.floor(count / savedAnimals.length);
-    const remainder = count % savedAnimals.length;
-
-    savedAnimals.forEach((sp, index) => {
-      const amount = baseCount + (index < remainder ? 1 : 0);
-
-      this.spawnSpeciesInClusters(
-        sp.name,
-        sp.genes,
-        sp.customImages || {},
-        amount
-      );
-    });
-
-    return;
-  }
-
-  // Sem espécies salvas, utiliza as espécies padrão.
-  const predCount = Math.max(1, Math.round(count * 0.25));
-  const herbCount = count - predCount;
-
-  const herbGenes = {
-    size: 0.35,
-    diet: { meat: 0.0, plant: 0.90, carcass: 0.10 },
-    speed: 0.60,
-    perception: 0.65,
-    gestation: 0.30,
-    offspringCount: 0.70,
-    aggression: 0.10,
-    health: 0.60,
-    thermal: 0.0,
-    colorHue: 125
-  };
-
-  const predGenes = {
-    size: 0.65,
-    diet: { meat: 0.85, plant: 0.05, carcass: 0.10 },
-    speed: 0.70,
-    perception: 0.80,
-    gestation: 0.50,
-    offspringCount: 0.35,
-    aggression: 0.75,
-    health: 0.60,
-    thermal: 0.0,
-    colorHue: 15
-  };
-
-  this.spawnSpeciesInClusters(
-    'Herbívoro Campestre',
-    herbGenes,
-    {},
-    herbCount
-  );
-
-  this.spawnSpeciesInClusters(
-    'Predador Alfa',
-    predGenes,
-    {},
-    predCount
-  );
-}
-
 
   selectEntityAt(canvasX, canvasY) {
     let found = null, minDist = 22;
@@ -2477,7 +2218,6 @@ reinjectPioneers(count = 18) {
     const W = this.canvas.width, H = this.canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    // OTIMIZAÇÃO: Desenha o terreno do cache pré-renderizado (1 única operação de GPU)
     if (this.terrainCanvas && this.terrainCanvas.width === W && this.terrainCanvas.height === H) {
       ctx.drawImage(this.terrainCanvas, 0, 0);
     } else {
@@ -2505,7 +2245,7 @@ reinjectPioneers(count = 18) {
       ctx.restore();
     });
 
-    // ── VEGETAIS (Modo Simplificado vs Modo Detalhado) ──
+    // Vegetais
     if (this.simplifiedSprites) {
       this.plants.forEach(plant => {
         try {
@@ -2565,7 +2305,7 @@ reinjectPioneers(count = 18) {
       });
     }
 
-    // ── ANIMAIS (Modo Simplificado vs Modo Detalhado) ──
+    // Animais
     if (this.simplifiedSprites) {
       this.animals.forEach(anim => {
         try {
@@ -2573,7 +2313,6 @@ reinjectPioneers(count = 18) {
           const animSize = anim.genes?.size ?? 0.5;
           const r = Math.max(3.5, 4 + animSize * 7);
 
-          // Cor pelo papel trófico
           if (isCarn) {
             ctx.fillStyle = '#f85149';
           } else {
@@ -2585,7 +2324,6 @@ reinjectPioneers(count = 18) {
           ctx.arc(anim.x, anim.y, r, 0, Math.PI * 2);
           ctx.fill();
 
-          // Vetor de direção da criatura
           const heading = Math.atan2(anim.vy || 0, anim.vx || 0);
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1.5;
@@ -2604,7 +2342,6 @@ reinjectPioneers(count = 18) {
             ctx.stroke();
           }
 
-          // Mini barra de energia rápida
           const barW = 12, barH = 2;
           const maxE = anim.maxEnergy || 100.0;
           const energyPct = Math.max(0, Math.min(1, anim.energy / maxE));
@@ -2683,16 +2420,14 @@ reinjectPioneers(count = 18) {
         ctx.restore();
       }
     }
-    // ── 4. FILTRO VISUAL CLIMÁTICO (Azulado para Frio / Amarelado para Calor) ──
+
     const effectiveTemp = SEASONS[this.seasonIndex].temp + (this.climateTrend || 0);
     if (Math.abs(effectiveTemp) > 0.12) {
       ctx.save();
       if (effectiveTemp < 0) {
-        // Clima frio/glacial: névoa azul-gelo
         const coldAlpha = Math.min(0.24, Math.abs(effectiveTemp) * 0.20);
         ctx.fillStyle = `rgba(80, 160, 255, ${coldAlpha})`;
       } else {
-        // Clima quente/árido: radiação dourada/âmbar
         const heatAlpha = Math.min(0.22, effectiveTemp * 0.18);
         ctx.fillStyle = `rgba(255, 170, 40, ${heatAlpha})`;
       }
@@ -2700,7 +2435,7 @@ reinjectPioneers(count = 18) {
       ctx.restore();
     }
 
-    // ── 5. EFEITOS VISUAIS DE CATÁSTROFE & METEORO ──
+    // Catástrofes e meteoros
     if (this.disasterEffects && this.disasterEffects.length > 0) {
       for (let i = this.disasterEffects.length - 1; i >= 0; i--) {
         const eff = this.disasterEffects[i];
@@ -2711,7 +2446,6 @@ reinjectPioneers(count = 18) {
             const curY = eff.startY + (eff.targetY - eff.startY) * eff.progress;
 
             ctx.save();
-            // Cauda de plasma incandescente
             ctx.strokeStyle = '#ff6f00';
             ctx.lineWidth = 6;
             ctx.lineCap = 'round';
@@ -2720,7 +2454,6 @@ reinjectPioneers(count = 18) {
             ctx.lineTo(curX, curY);
             ctx.stroke();
 
-            // Núcleo branco-amarelado
             ctx.strokeStyle = '#fff9c4';
             ctx.lineWidth = 2.5;
             ctx.beginPath();
@@ -2728,13 +2461,11 @@ reinjectPioneers(count = 18) {
             ctx.lineTo(curX, curY);
             ctx.stroke();
 
-            // Cabeça do meteoro
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(curX, curY, 6, 0, Math.PI * 2);
             ctx.fill();
 
-            // Halo de fogo ao redor da cabeça
             ctx.fillStyle = 'rgba(255, 87, 34, 0.6)';
             ctx.beginPath();
             ctx.arc(curX, curY, 14, 0, Math.PI * 2);
@@ -2753,13 +2484,11 @@ reinjectPioneers(count = 18) {
             const t = eff.explosionAge / eff.maxExplosionAge;
 
             ctx.save();
-            // Clarão térmico nos primeiros 3 frames
             if (eff.explosionAge <= 3) {
               ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
               ctx.fillRect(0, 0, W, H);
             }
 
-            // Onda de choque em expansão
             eff.shockwaveRadius = t * eff.maxShockwaveRadius;
             const shockAlpha = Math.max(0, 1.0 - t);
             ctx.strokeStyle = `rgba(255, 140, 0, ${shockAlpha})`;
@@ -2768,7 +2497,6 @@ reinjectPioneers(count = 18) {
             ctx.arc(eff.targetX, eff.targetY, eff.shockwaveRadius, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Segunda onda interna
             if (t > 0.15) {
               const t2 = (t - 0.15) / 0.85;
               ctx.strokeStyle = `rgba(255, 215, 0, ${Math.max(0, 0.8 - t2)})`;
@@ -2778,13 +2506,11 @@ reinjectPioneers(count = 18) {
               ctx.stroke();
             }
 
-            // Brilho térmico da cratera
             ctx.fillStyle = `rgba(255, 69, 0, ${Math.max(0, 0.75 - t * 0.75)})`;
             ctx.beginPath();
             ctx.arc(eff.targetX, eff.targetY, eff.craterRadiusPx * (0.8 + t * 0.2), 0, Math.PI * 2);
             ctx.fill();
 
-            // Partículas incandescentes e estilhaços
             eff.particles.forEach(p => {
               p.x += p.vx;
               p.y += p.vy;
@@ -2807,14 +2533,12 @@ reinjectPioneers(count = 18) {
       }
     }
 
-    // ── 6. NÉVOA DO INVERNO DE IMPACTO (POEIRA ESTRATOSFÉRICA) ──
     if (this.impactWinterTicks > 0) {
       ctx.save();
       const intensity = Math.min(1.0, this.impactWinterTicks / 50.0);
       ctx.fillStyle = `rgba(45, 35, 30, ${0.30 * intensity})`;
       ctx.fillRect(0, 0, W, H);
 
-      // Partículas de cinzas em suspensão caindo suavemente
       ctx.fillStyle = 'rgba(200, 190, 180, 0.45)';
       const ashSeed = (this.tickCount * 2) % 100;
       for (let s = 0; s < 22; s++) {
@@ -2826,7 +2550,6 @@ reinjectPioneers(count = 18) {
     }
   }
 
-  // ── MÉTODOS DE CATÁSTROFE: METEORO ──
   triggerMeteor(targetX = null, targetY = null) {
     if (targetX === null || targetY === null) {
       if (this.animals.length > 0 && Math.random() < 0.75) {
@@ -2893,7 +2616,6 @@ reinjectPioneers(count = 18) {
     let vaporizedAnimals = 0;
     let damagedAnimals = 0;
 
-    // 1. TERRENO E CRATERA
     for (let r = 0; r < this.gridRows; r++) {
       for (let c = 0; c < this.gridCols; c++) {
         const cell = this.grid[r]?.[c];
@@ -2908,7 +2630,7 @@ reinjectPioneers(count = 18) {
           cell.biome = 'rocky';
           cell.soilNitrogen = Math.max(0.5, cell.soilNitrogen * 0.1);
           cell.moisture = Math.max(0.05, cell.moisture * 0.15);
-          cell.organicBiomass = Math.min(80.0, cell.organicBiomass + 30.0);
+          cell.addOrganicBiomass(30.0);
 
           if (cell.plant) {
             const pIdx = this.plants.indexOf(cell.plant);
@@ -2930,7 +2652,6 @@ reinjectPioneers(count = 18) {
       }
     }
 
-    // 2. FAUNA (Vaporização e Onda de Choque)
     for (let i = this.animals.length - 1; i >= 0; i--) {
       const a = this.animals[i];
       const dist = Math.hypot(a.x - targetX, a.y - targetY);
@@ -2941,14 +2662,14 @@ reinjectPioneers(count = 18) {
           const ac = Math.floor(a.x / this.cellSize);
           const cell = this.grid[ar]?.[ac];
           if (cell && !cell.carcass) {
-            const carcass = {
-              r: ar, c: ac,
-              x: a.x, y: a.y,
-              remainingEnergy: 20.0,
-              decayTimer: 0,
-              genes: a.genes,
-              speciesName: a.speciesName || a.name
-            };
+            const carcass = new Carcass(
+              'carcass_' + Math.random().toString(36).substr(2, 9),
+              a.speciesName || a.name,
+              a.x, a.y,
+              ar, ac,
+              20.0,
+              a.genes
+            );
             cell.carcass = carcass;
             this.carcasses.push(carcass);
           }
@@ -2990,9 +2711,9 @@ reinjectPioneers(count = 18) {
     const elPlants = document.getElementById('stat-plants-count');
     const elCarcasses = document.getElementById('stat-carcasses-count');
 
-   const curSeason = SEASONS[this.seasonIndex];
+    const curSeason = SEASONS[this.seasonIndex];
     const effTemp = curSeason.temp + (this.climateTrend || 0);
-    const tempDeg = Math.round(18 + effTemp * 16); // Temperatura em graus Celsius realistas
+    const tempDeg = Math.round(18 + effTemp * 16);
     if (this.impactWinterTicks > 0) {
       if (elSeason) elSeason.innerHTML = `☄️ Inverno de Impacto (${tempDeg - 6}°C) [${this.impactWinterTicks}t]`;
     } else {
@@ -3167,3 +2888,29 @@ reinjectPioneers(count = 18) {
 }
 
 const engine = new SimulationEngine();
+
+if (typeof window !== 'undefined') {
+  window.Vector2D = Vector2D;
+  window.Genome = Genome;
+  window.GridCell = GridCell;
+  window.Entity = Entity;
+  window.Carcass = Carcass;
+  window.Organism = Organism;
+  window.Plant = Plant;
+  window.Animal = Animal;
+  window.SimulationEngine = SimulationEngine;
+  window.engine = engine;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.Vector2D = Vector2D;
+  globalThis.Genome = Genome;
+  globalThis.GridCell = GridCell;
+  globalThis.Entity = Entity;
+  globalThis.Carcass = Carcass;
+  globalThis.Organism = Organism;
+  globalThis.Plant = Plant;
+  globalThis.Animal = Animal;
+  globalThis.SimulationEngine = SimulationEngine;
+  globalThis.engine = engine;
+}
+

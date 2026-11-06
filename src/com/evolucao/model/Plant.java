@@ -4,9 +4,7 @@ package com.evolucao.model;
  * Entidade vegetal fundamentada na Lei do Mínimo de Liebig
  * e partição de biomassa radicular, foliar e defensiva.
  */
-public class Plant {
-    private final String id;
-    private final String name;
+public class Plant extends Organism {
     private final int r;
     private final int c;
 
@@ -16,18 +14,14 @@ public class Plant {
     private double defense;
     private double fruitAttraction;
     private double parasiteResistance;
-    private double thermal;
 
-    private double energy;
     private double growth;
     private boolean hasFruit;
-    private int age;
 
     public Plant(String id, String name, int r, int c, double height, double rootEfficiency,
                  double growthSpeed, double defense, double fruitAttraction,
                  double parasiteResistance, double thermal) {
-        this.id = id;
-        this.name = name;
+        super(id, name, name, (c + 0.5) * 26.0, (r + 0.5) * 26.0, 40.0, 45.0, thermal);
         this.r = r;
         this.c = c;
         this.height = height;
@@ -36,20 +30,18 @@ public class Plant {
         this.defense = defense;
         this.fruitAttraction = fruitAttraction;
         this.parasiteResistance = parasiteResistance;
-        this.thermal = thermal;
 
-        this.energy = 40.0;
         this.growth = 0.35;
         this.hasFruit = false;
-        this.age = 0;
     }
 
     public double getMaintenanceCost() {
         return 0.02 + (height * 0.02) + (defense * 0.015);
     }
 
+    @Override
     public void tick(Season season, GridCell cell) {
-        age++;
+        ageOneTick();
         double cost = getMaintenanceCost();
 
         double nitrogenFactor = cell.getSoilNitrogen() / (10.0 + cell.getSoilNitrogen());
@@ -67,23 +59,41 @@ public class Plant {
             if (growth >= 0.70) {
                 hasFruit = true;
             }
+            if (liebigBottleneck > 0.35 && energy < maxEnergy) {
+                gainEnergy(0.12 * liebigBottleneck);
+            }
         } else {
-            energy -= 0.20;
+            consumeEnergy(0.32 * (1.0 + height * 0.4));
+        }
+
+        if (liebigBottleneck < 0.20) {
+            consumeEnergy(0.14);
+        }
+
+        if (energy <= 0.0) {
+            this.alive = false;
         }
     }
 
-    public boolean isDead() {
-        return energy <= 0.0 || age > 500;
+    public double beEaten(double biteAmount) {
+        double eaten = Math.min(growth, biteAmount);
+        growth -= eaten;
+        if (growth <= 0.05) {
+            this.alive = false;
+        }
+        return eaten;
     }
 
-    public String getId() { return id; }
-    public String getName() { return name; }
     public int getR() { return r; }
     public int getC() { return c; }
-    public double getGrowth() { return growth; }
-    public boolean isHasFruit() { return hasFruit; }
-    public void setHasFruit(boolean hasFruit) { this.hasFruit = hasFruit; }
+    public double getHeight() { return height; }
+    public double getRootEfficiency() { return rootEfficiency; }
+    public double getGrowthSpeed() { return growthSpeed; }
     public double getDefense() { return defense; }
-    public double getEnergy() { return energy; }
+    public double getFruitAttraction() { return fruitAttraction; }
+    public double getParasiteResistance() { return parasiteResistance; }
+    public double getGrowth() { return growth; }
     public void setGrowth(double growth) { this.growth = growth; }
+    public boolean hasFruit() { return hasFruit; }
+    public void setHasFruit(boolean hasFruit) { this.hasFruit = hasFruit; }
 }

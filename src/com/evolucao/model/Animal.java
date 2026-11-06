@@ -4,16 +4,7 @@ package com.evolucao.model;
  * Modelo de organismo animal regido pela Lei de Alometria de Kleiber (B ~ M^0.75),
  * Curvas de Desempenho Térmico Gaussianas (TPC) e Dieta Trófica Estrita.
  */
-public class Animal {
-    private final String id;
-    private final String name;
-    private final String speciesName;
-
-    private double x;
-    private double y;
-    private double vx;
-    private double vy;
-
+public class Animal extends Organism {
     // Genoma Quantitativo
     private double size;
     private double carnivore;
@@ -25,10 +16,7 @@ public class Animal {
     private double offspringCount;
     private double aggression;
     private double health;
-    private double thermal;
 
-    private double energy;
-    private int age;
     private int mateCooldown;
     private String stateLabel;
 
@@ -36,11 +24,7 @@ public class Animal {
                   double size, double carnivore, double plant, double speed,
                   double perception, double gestation, double offspringCount,
                   double aggression, double health, double thermal) {
-        this.id = id;
-        this.name = name;
-        this.speciesName = speciesName;
-        this.x = x;
-        this.y = y;
+        super(id, name, speciesName, x, y, 85.0, 100.0 + carnivore * 80.0, thermal);
         this.vx = (Math.random() - 0.5) * 1.5;
         this.vy = (Math.random() - 0.5) * 1.5;
 
@@ -54,10 +38,7 @@ public class Animal {
         this.offspringCount = offspringCount;
         this.aggression = aggression;
         this.health = health;
-        this.thermal = thermal;
 
-        this.energy = 85.0;
-        this.age = 0;
         this.mateCooldown = 30;
         this.stateLabel = "Forrageando";
     }
@@ -70,48 +51,50 @@ public class Animal {
         double curSpeed = Math.hypot(vx, vy);
         double locomotionCost = 0.04 * Math.pow(curSpeed / 2.0, 1.5);
 
-        double tempDiff = Math.abs(thermal - season.getTemperature());
-        double thermalCostFactor = 1.0 + (tempDiff > 0.4 ? 0.3 : 0.0) * season.getThermalCostMultiplier();
+        double deltaT = Math.abs(thermal - season.getTemperature());
+        double thermalCost = Math.exp(deltaT * deltaT / 0.5) * 0.02 * season.getThermalCostMultiplier();
 
-        return (basalMetabolism + locomotionCost) * thermalCostFactor;
+        return basalMetabolism + locomotionCost + thermalCost;
+    }
+
+    @Override
+    public void tick(Season season, GridCell cell) {
+        ageOneTick();
+        if (mateCooldown > 0) mateCooldown--;
+
+        double cost = calculateMetabolicCost(season);
+        consumeEnergy(cost);
+
+        if (this.energy <= 0.0 || this.age > (700 + size * 200)) {
+            this.alive = false;
+        }
     }
 
     public void tick(Season season) {
-        age++;
-        if (mateCooldown > 0) mateCooldown--;
-        energy -= calculateMetabolicCost(season);
+        tick(season, null);
     }
 
-    public boolean isDead() {
-        return energy <= 0.0 || age > 750;
+    public void move(double maxX, double maxY) {
+        x += vx;
+        y += vy;
+        if (x < 12.0) { x = 12.0; vx = -vx; }
+        if (x > maxX) { x = maxX; vx = -vx; }
+        if (y < 12.0) { y = 12.0; vy = -vy; }
+        if (y > maxY) { y = maxY; vy = -vy; }
     }
 
-    public String getId() { return id; }
-    public String getName() { return name; }
-    public String getSpeciesName() { return speciesName; }
-    public double getX() { return x; }
-    public double getY() { return y; }
-    public void setX(double x) { this.x = x; }
-    public void setY(double y) { this.y = y; }
-    public double getVx() { return vx; }
-    public double getVy() { return vy; }
-    public void setVx(double vx) { this.vx = vx; }
-    public void setVy(double vy) { this.vy = vy; }
-    public double getEnergy() { return energy; }
-    public void setEnergy(double energy) { this.energy = Math.min(100.0, energy); }
     public double getSize() { return size; }
     public double getCarnivore() { return carnivore; }
     public double getPlant() { return plant; }
+    public double getCarcassDiet() { return carcassDiet; }
     public double getSpeed() { return speed; }
     public double getPerception() { return perception; }
-    public double getHealth() { return health; }
-    public double getAggression() { return aggression; }
-    public double getThermal() { return thermal; }
+    public double getGestation() { return gestation; }
     public double getOffspringCount() { return offspringCount; }
+    public double getAggression() { return aggression; }
+    public double getHealth() { return health; }
     public int getMateCooldown() { return mateCooldown; }
-    public void setMateCooldown(int mateCooldown) { this.mateCooldown = mateCooldown; }
+    public void setMateCooldown(int cd) { this.mateCooldown = cd; }
     public String getStateLabel() { return stateLabel; }
-    public void setStateLabel(String stateLabel) { this.stateLabel = stateLabel; }
-    public int getAge() { return age; }
+    public void setStateLabel(String label) { this.stateLabel = label; }
 }
-
