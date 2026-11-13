@@ -541,6 +541,8 @@ class Animal extends Organism {
     this.carriedSeed = null;
     this.fleeTicks = 0;
     this.carcassEnergy = null;
+    const baseLifespan = meatRatio > 0.45 ? (950 + (genome.size || 0.5) * 300) : (700 + (genome.size || 0.5) * 150);
+    this.maxLifespan = Math.round(baseLifespan * (0.82 + Math.random() * 0.36));
   }
 
   calculateMetabolicCost(curSeason, inWater) {
@@ -587,6 +589,10 @@ class Animal extends Organism {
     if (this.isPregnant) {
       this.gestationTicks--;
       totalCost += 0.08;
+    }
+
+    if (meatRatio > 0.45 && this.energy < 28.0 && this.state !== 'hunting') {
+      totalCost *= 0.65;
     }
 
     if (meatRatio > 0.45 && this.state !== 'hunting' && this.state !== 'fleeing') {
@@ -647,7 +653,7 @@ class Animal extends Organism {
     this.consumeEnergy(cost);
 
     const g = this.genes;
-    const maxLifespan = (g.diet?.meat || 0) > 0.45 ? (950 + (g.size || 0.5) * 300) : (700 + (g.size || 0.5) * 150);
+    const maxLifespan = this.maxLifespan || ((g.diet?.meat || 0) > 0.45 ? (950 + (g.size || 0.5) * 300) : (700 + (g.size || 0.5) * 150));
 
     if (this.energy <= 0 || this.age > maxLifespan) {
       if (engine.animalMetrics) {
@@ -822,10 +828,10 @@ class Animal extends Organism {
             this.vx *= 0.1; this.vy *= 0.1;
             const bite = bestCarcass.consumeBite(4.0);
 
-            if (bestCarcass.speciesName === this.speciesName) {
+            if (bestCarcass.speciesName === this.speciesName && Math.random() < 0.40) {
               if (engine.aiMetrics) engine.aiMetrics.prionInfections++;
               this.isDiseased = true;
-              this.diseaseTimer = Math.min(320, (this.diseaseTimer || 0) + 180);
+              this.diseaseTimer = Math.min(200, (this.diseaseTimer || 0) + 120);
               this.stateLabel = '☣️ Canibalismo (Infectado por Príon!)';
               if (typeof toast === 'function' && Math.random() < 0.25) {
                 toast(`☣️ ${this.name} contraiu Príon por necro-canibalismo!`);
@@ -1569,6 +1575,10 @@ class SimulationEngine {
       genes,
       customImages
     );
+    if (this.tickCount === 0) {
+      plant.age = Math.floor(Math.random() * 120);
+      plant.growth = 0.25 + Math.random() * 0.45;
+    }
     cell.plant = plant;
     this.plants.push(plant);
     return plant;
@@ -1709,6 +1719,9 @@ class SimulationEngine {
       customImages
     );
 
+    if (this.tickCount === 0) {
+      animal.age = Math.floor(Math.random() * 260);
+    }
     this.animals.push(animal);
     return animal;
   }
