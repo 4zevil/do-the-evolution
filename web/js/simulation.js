@@ -634,7 +634,7 @@ class Animal extends Organism {
           );
           baby.vx = (Math.random() - 0.5) * babySpeed;
           baby.vy = (Math.random() - 0.5) * babySpeed;
-          baby.energy = (babyGenes.diet?.meat || 0) > 0.45 ? 58.0 : 24.0;
+          baby.energy = (babyGenes.diet?.meat || 0) > 0.45 ? 58.0 : 38.0;
           baby.stateLabel = 'Recém-nascido (Frágil)';
           baby.mateCooldown = 60;
           newOffspring.push(baby);
@@ -772,8 +772,9 @@ class Animal extends Organism {
         this.state = 'fleeing';
         this.stateLabel = 'Fugindo de Predador!';
         this.fleeTicks = (this.fleeTicks || 0) + 1;
-        const fatigue = this.fleeTicks > 40 ? Math.max(0.68, 1.0 - (this.fleeTicks - 40) * 0.012) : 1.0;
-        desiredSpeed = maxSpeed * fatigue;
+        const burst = this.fleeTicks < 25 ? 1.22 : 1.0;
+        const fatigue = this.fleeTicks > 45 ? Math.max(0.72, 1.0 - (this.fleeTicks - 45) * 0.012) : 1.0;
+        desiredSpeed = maxSpeed * burst * fatigue;
 
         const angle = Math.atan2(this.y - threat.y, this.x - threat.x);
         this.vx = this.vx * 0.50 + Math.cos(angle) * desiredSpeed * 0.50;
@@ -838,7 +839,7 @@ class Animal extends Organism {
       }
 
       // B. Predação
-      const satietyThreshold = this.maxEnergy * (engine.equilibriumSettings?.predatorSatietyThreshold ?? 0.65);
+      const satietyThreshold = this.maxEnergy * (engine.equilibriumSettings?.predatorSatietyThreshold ?? 0.52);
       const isCarnivoreAgent = (g.diet?.meat || 0) > 0.45;
       const isHungryCarnivore = isCarnivoreAgent && !targetX && this.energy < satietyThreshold;
 
@@ -1002,31 +1003,31 @@ class Animal extends Organism {
     const preyPerPredator = totalCarnivores > 0 ? (totalHerbivores / totalCarnivores) : 20.0;
     let reproductionFactor;
     if (isCarnivore) {
-      if (totalCarnivores < 4) {
-        reproductionFactor = totalHerbivores >= 8 ? 1.8 : 0.2;
-      } else if (preyPerPredator < 5.0 || totalCarnivores >= 40) {
-        reproductionFactor = 0.02;
-      } else if (preyPerPredator < 8.0) {
-        reproductionFactor = 0.25;
-      } else if (totalCarnivores < 18) {
-        reproductionFactor = 1.25;
-      } else {
+      if (totalCarnivores < 3) {
+        reproductionFactor = totalHerbivores >= 10 ? 0.85 : 0.05;
+      } else if (preyPerPredator < 7.0 || totalCarnivores >= 12 || totalCarnivores > totalHerbivores * 0.16) {
+        reproductionFactor = 0.01;
+      } else if (preyPerPredator < 10.0) {
+        reproductionFactor = 0.10;
+      } else if (preyPerPredator >= 14.0 && totalCarnivores < 8) {
         reproductionFactor = 0.65;
+      } else {
+        reproductionFactor = 0.25;
       }
     } else {
-      reproductionFactor = totalHerbivores < 80
-        ? 1.85
-        : totalHerbivores < 260
+      reproductionFactor = totalHerbivores < 35
+        ? 1.60
+        : totalHerbivores < 70
           ? 1.15
-          : totalHerbivores >= 400
-            ? 0.0
-            : 1.0 - ((totalHerbivores - 260) / 140);
+          : totalHerbivores < 120
+            ? 0.65
+            : totalHerbivores < 160
+              ? 0.20
+              : 0.01;
     }
 
     const canStartReproduction = Math.random() < reproductionFactor;
-    const reproEnergyThreshold = isCarnivore 
-      ? (totalCarnivores < 20 ? 75.0 : 90.0)
-      : 68.0;
+    const reproEnergyThreshold = isCarnivore ? 90.0 : 65.0;
 
     if (
       canStartReproduction &&
@@ -1145,21 +1146,21 @@ class Animal extends Organism {
 
           let clutchSize;
           if (isCarnivore) {
-            clutchSize = totalCarnivores < 20 ? 3 : (totalCarnivores < 40 ? 2 : (Math.random() < ((offA + offB) / 2) ? 2 : 1));
+            clutchSize = (preyPerPredator >= 12 && totalCarnivores < 8) ? 2 : 1;
           } else {
-            clutchSize = Math.random() < ((offA + offB) / 2) ? 2 : 1;
+            clutchSize = (totalHerbivores < 60 && Math.random() < 0.6) ? 2 : 1;
           }
           if (speciationCheck.diverged && clutchSize < 2) clutchSize = 2;
 
           this.isPregnant = true;
-          const gestFactor = (isCarnivore && totalCarnivores < 20) ? 0.70 : 1.0;
+          const gestFactor = isCarnivore ? 1.25 : (totalHerbivores < 60 ? 0.80 : 1.0);
           this.gestationTicks = Math.max(15, Math.round((28 + ((gestA + gestB) / 2) * 35) * gestFactor));
           this.pregnantGenes = childGenes;
           this.pregnantSpeciesName = finalSpeciesName;
           this.pregnantClutchSize = clutchSize;
           this.stateLabel = 'Iniciou Gestação';
 
-          const mateCooldownVal = (isCarnivore && totalCarnivores < 20) ? 45 : 85;
+          const mateCooldownVal = isCarnivore ? 140 : (totalHerbivores < 60 ? 60 : 85);
           this.mateCooldown = mateCooldownVal;
           bestMate.mateCooldown = mateCooldownVal;
           return;
@@ -1652,8 +1653,8 @@ class SimulationEngine {
       speed: 0.7, perception: 0.8, aggression: 0.7, health: 0.6, thermal: 0.0, colorHue: 15
     };
 
-    const predCount = Math.max(2, Math.round((count || 18) * 0.25));
-    const herbCount = Math.max(4, (count || 18) - predCount);
+    const predCount = Math.max(1, Math.round((count || 20) * 0.15));
+    const herbCount = Math.max(4, (count || 20) - predCount);
 
     this.spawnSpeciesInClusters('Lebre Saltadora', defaultGenesHerb, {}, herbCount, 3);
     this.spawnSpeciesInClusters('Lobo Caçador', defaultGenesCarn, {}, predCount, 2);
@@ -2176,7 +2177,7 @@ class SimulationEngine {
       return;
     }
 
-    const predCount = Math.max(1, Math.round(count * 0.25));
+    const predCount = Math.max(1, Math.round(count * 0.15));
     const herbCount = count - predCount;
     const herbGenes = {
       size: 0.35, diet: { meat: 0.0, plant: 0.90, carcass: 0.10 },
