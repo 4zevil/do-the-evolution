@@ -1597,6 +1597,44 @@ body {
   font-weight: 700;
 }
 
+/* ── CONTROLES DE CLIMA ── */
+.climate-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.03);
+}
+.climate-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-right: 2px;
+  user-select: none;
+}
+.climate-btn {
+  min-width: 36px;
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.climate-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.climate-btn.cool { color: #60b3e8; border-color: #60b3e8; }
+.climate-btn.cool:hover { background: #1a4a6e; color: #9dd4f5; }
+.climate-btn.heat { color: #f08060; border-color: #c05030; }
+.climate-btn.heat:hover { background: #6e2010; color: #f5b090; }
+
 /* ── BOTÃO DE CATÁSTROFE (METEORO) & MIRA ── */
 #btn-trigger-meteor {
   transition: all 0.2s ease;

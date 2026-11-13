@@ -720,6 +720,47 @@
           </div>
         </div>
 
+        <!-- 5. AMBIENTE PERSONALIZADO -->
+        <div class="world-config" style="margin-top:0;">
+          <h3>5. 🎨 Ambiente Personalizado</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Ajuste as condições físicas iniciais do mundo antes de iniciar. Esses parâmetros afetam diretamente a sobrevivência desde o tick 1.</p>
+
+          <div class="cfg-row">
+            <label>🌡️ Temperatura Base Inicial</label>
+            <input type="range" id="world-init-temp" min="-8" max="8" step="1" value="0"
+              oninput="updateInitTempLabel(this.value)" />
+            <span class="cfg-val" id="world-init-temp-val">+0°C</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>🌊 Proporção de Água</label>
+            <input type="range" id="world-water-ratio" min="0" max="40" step="2" value="8"
+              oninput="document.getElementById('world-water-ratio-val').textContent = this.value + '%'" />
+            <span class="cfg-val" id="world-water-ratio-val">8%</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>🪨 Proporção de Rochas</label>
+            <input type="range" id="world-rocky-ratio" min="0" max="30" step="2" value="6"
+              oninput="document.getElementById('world-rocky-ratio-val').textContent = this.value + '%'" />
+            <span class="cfg-val" id="world-rocky-ratio-val">6%</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>🌱 Fertilidade do Solo</label>
+            <input type="range" id="world-soil-fertility" min="20" max="100" step="5" value="60"
+              oninput="document.getElementById('world-soil-fertility-val').textContent = this.value + '%'" />
+            <span class="cfg-val" id="world-soil-fertility-val">60%</span>
+          </div>
+
+          <div class="cfg-row">
+            <label>☀️ Intensidade Solar</label>
+            <input type="range" id="world-sunlight" min="30" max="100" step="5" value="70"
+              oninput="document.getElementById('world-sunlight-val').textContent = this.value + '%'" />
+            <span class="cfg-val" id="world-sunlight-val">70%</span>
+          </div>
+        </div>
+
         <!-- BOTÃO DE INICIAR -->
         <div style="display:flex;justify-content:center;padding:10px 0 30px;">
           <button class="btn btn-primary" style="font-size:15px;padding:12px 36px;" onclick="saveAndStartWorld()">
@@ -787,6 +828,14 @@
         <button id="btn-trigger-meteor" class="btn btn-danger btn-sm" onclick="toggleMeteorMode()" title="Catástrofe: Lançar Meteoro (Clique para mirar no mapa ou clique novamente para impacto aleatório)">
           ☄️ Meteoro
         </button>
+
+        <!-- CONTROLES DE MUDANÇA CLIMÁTICA -->
+        <div class="climate-group" title="Simular Mudança Climática: aquecimento ou resfriamento global">
+          <span class="climate-label">🌡️ Clima</span>
+          <button class="btn btn-secondary btn-sm climate-btn" onclick="shiftClimateGlobal(-0.25)" title="Resfriamento Global −4°C">🧊 −</button>
+          <button class="btn btn-secondary btn-sm climate-btn" onclick="resetClimate()" id="btn-reset-climate" title="Resetar Clima">↺</button>
+          <button class="btn btn-secondary btn-sm climate-btn" onclick="shiftClimateGlobal(+0.25)" title="Aquecimento Global +4°C">🔥 +</button>
+        </div>
       </div>
 
       <div class="sim-badges">

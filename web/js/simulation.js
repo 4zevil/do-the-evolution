@@ -364,7 +364,9 @@ class Plant extends Organism {
     const tempDiff = Math.abs((g.thermal || 0.0) - curSeason.temp);
     const thermalPlantFactor = tempDiff > 0.4 ? 1.0 + (tempDiff - 0.4) * 0.6 : 1.0;
 
-    const lightFactor = (curSeason.sunlight * 1.0) / (0.4 + curSeason.sunlight);
+    const sunlightMod = engine?.equilibriumSettings?.sunlightMultiplier ?? 1.0;
+    const effectiveSunlight = curSeason.sunlight * sunlightMod;
+    const lightFactor = effectiveSunlight / (0.4 + effectiveSunlight);
     const nitrogenFactor = cell.soilNitrogen / (10.0 + cell.soilNitrogen);
     const waterFactor = Math.min(1.0, cell.moisture * (0.7 + (g.rootEfficiency || 0.5) * 0.6));
     const liebig = Math.min(lightFactor, nitrogenFactor, waterFactor) / thermalPlantFactor;
@@ -1209,6 +1211,7 @@ class SimulationEngine {
   constructor() {
     this.showGridLines = true;
     this.climateTrend = 0.0;
+    this.climateOffset = 0.0;
     this.hydrologyTimer = 0;
 
     this.gridCols = 32;
@@ -1380,18 +1383,18 @@ class SimulationEngine {
     if (!tctx) return;
 
     const baseColors = {
-      fertile: '#1a3320',
-      arid: '#382e1e',
-      tundra: '#1f2a38',
-      wetland: '#153028',
-      water: '#0d223a',
-      rocky: '#262626'
+      fertile: '#2d6a3f',
+      arid: '#7a5c2e',
+      tundra: '#3d5a72',
+      wetland: '#2a6655',
+      water: '#1a4a7a',
+      rocky: '#4a4a4a'
     };
 
     for (let r = 0; r < this.gridRows; r++) {
       for (let c = 0; c < this.gridCols; c++) {
         const cell = this.grid[r][c];
-        tctx.fillStyle = cell.cachedColor || baseColors[cell.biome] || '#1a3320';
+        tctx.fillStyle = cell.cachedColor || baseColors[cell.biome] || '#2d6a3f';
         tctx.fillRect(c * this.cellSize, r * this.cellSize, this.cellSize, this.cellSize);
 
         if (this.showGridLines) {
@@ -1509,12 +1512,12 @@ class SimulationEngine {
   buildGrid(biomeType) {
     this.grid = [];
     const baseColors = {
-      fertile: '#1a3320',
-      arid: '#382e1e',
-      tundra: '#1f2a38',
-      wetland: '#153028',
-      water: '#0d223a',
-      rocky: '#262626'
+      fertile: '#2d6a3f',
+      arid: '#7a5c2e',
+      tundra: '#3d5a72',
+      wetland: '#2a6655',
+      water: '#1a4a7a',
+      rocky: '#4a4a4a'
     };
 
     for (let r = 0; r < this.gridRows; r++) {
@@ -1531,8 +1534,8 @@ class SimulationEngine {
         cell.soilNitrogen = cell.maxSoilNitrogen * (0.5 + Math.random() * 0.4);
         cell.organicBiomass = Math.random() * 5.0;
 
-        const base = baseColors[b] || '#1a3320';
-        const lum = Math.floor((Math.random() - 0.5) * 14);
+        const base = baseColors[b] || '#2d6a3f';
+        const lum = Math.floor((Math.random() - 0.5) * 18);
         cell.cachedColor = this.adjustColor(base, lum);
 
         row.push(cell);
@@ -1989,7 +1992,7 @@ class SimulationEngine {
       this.recordHistorySnapshot();
     }
 
-    this.climateTrend = -0.00015 * this.generation + Math.sin(this.tickCount * 0.0012) * 0.25;
+    this.climateTrend = (this.climateOffset || 0) + (-0.00015 * this.generation + Math.sin(this.tickCount * 0.0012) * 0.25);
     const effectiveTemp = curSeason.temp + this.climateTrend;
 
     // Hidrologia dinâmica
@@ -2603,26 +2606,26 @@ class SimulationEngine {
       progress: 0,
       fallSpeed: 0.065,
       explosionAge: 0,
-      maxExplosionAge: 36,
+      maxExplosionAge: 55,
       particles: [],
       shockwaveRadius: 0,
-      maxShockwaveRadius: 115,
-      craterRadiusPx: 48,
+      maxShockwaveRadius: 220,
+      craterRadiusPx: 90,
       executedImpact: false
     };
 
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 120; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 2.0 + Math.random() * 6.5;
+      const speed = 3.0 + Math.random() * 11.0;
       meteorEffect.particles.push({
         x: targetX,
         y: targetY,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        size: 2.0 + Math.random() * 3.5,
-        color: Math.random() < 0.5 ? '#ff5722' : (Math.random() < 0.5 ? '#ffeb3b' : '#ffffff'),
+        size: 2.5 + Math.random() * 5.5,
+        color: Math.random() < 0.4 ? '#ff5722' : (Math.random() < 0.5 ? '#ffeb3b' : (Math.random() < 0.5 ? '#ffffff' : '#ff9800')),
         life: 1.0,
-        decay: 0.02 + Math.random() * 0.03
+        decay: 0.012 + Math.random() * 0.025
       });
     }
 
@@ -2636,8 +2639,8 @@ class SimulationEngine {
   applyMeteorPhysicalImpact(effect) {
     const targetX = effect.targetX;
     const targetY = effect.targetY;
-    const craterCellRadius = 2.5;
-    const shockRadiusPx = effect.maxShockwaveRadius || 115;
+    const craterCellRadius = 4.5;
+    const shockRadiusPx = effect.maxShockwaveRadius || 220;
 
     let destroyedPlants = 0;
     let vaporizedAnimals = 0;
@@ -2654,10 +2657,12 @@ class SimulationEngine {
         const distInCells = dist / this.cellSize;
 
         if (distInCells <= craterCellRadius) {
+          // Cratera: vira rocky, perde todo nutriente
           cell.biome = 'rocky';
-          cell.soilNitrogen = Math.max(0.5, cell.soilNitrogen * 0.1);
-          cell.moisture = Math.max(0.05, cell.moisture * 0.15);
-          cell.addOrganicBiomass(30.0);
+          cell.soilNitrogen = 0;
+          cell.moisture = 0;
+          cell.organicBiomass = 0;
+          cell.addOrganicBiomass(5.0);
 
           if (cell.plant) {
             const pIdx = this.plants.indexOf(cell.plant);
@@ -2666,9 +2671,23 @@ class SimulationEngine {
             this.plantMetrics.nutrientDeaths++;
             destroyedPlants++;
           }
+        } else if (dist <= shockRadiusPx * 0.45) {
+          // Zona de incêndio próxima: solo danificado severamente
+          cell.moisture = Math.max(0, cell.moisture * 0.1);
+          cell.soilNitrogen = Math.max(0, cell.soilNitrogen * 0.15);
+          if (cell.plant) {
+            const pIdx = this.plants.indexOf(cell.plant);
+            if (pIdx !== -1) this.plants.splice(pIdx, 1);
+            cell.plant = null;
+            this.plantMetrics.nutrientDeaths++;
+            destroyedPlants++;
+          }
         } else if (dist <= shockRadiusPx) {
-          cell.moisture = Math.max(0.05, cell.moisture * 0.4);
-          if (cell.plant && Math.random() < 0.65) {
+          // Zona de onda de choque: dano parcial
+          const factor = 1.0 - (dist / shockRadiusPx);
+          cell.moisture = Math.max(0.05, cell.moisture * (1.0 - factor * 0.7));
+          cell.soilNitrogen = Math.max(2, cell.soilNitrogen * (1.0 - factor * 0.5));
+          if (cell.plant && Math.random() < 0.55 + factor * 0.4) {
             const pIdx = this.plants.indexOf(cell.plant);
             if (pIdx !== -1) this.plants.splice(pIdx, 1);
             cell.plant = null;
@@ -2684,36 +2703,51 @@ class SimulationEngine {
       const dist = Math.hypot(a.x - targetX, a.y - targetY);
 
       if (dist <= effect.craterRadiusPx) {
-        if (Math.random() < 0.45) {
-          const ar = Math.floor(a.y / this.cellSize);
-          const ac = Math.floor(a.x / this.cellSize);
-          const cell = this.grid[ar]?.[ac];
-          if (cell && !cell.carcass) {
-            const carcass = new Carcass(
-              'carcass_' + Math.random().toString(36).substr(2, 9),
-              a.speciesName || a.name,
-              a.x, a.y,
-              ar, ac,
-              20.0,
-              a.genes
-            );
-            cell.carcass = carcass;
-            this.carcasses.push(carcass);
-          }
+        // Cratera: morte instantânea garantida
+        const ar = Math.floor(a.y / this.cellSize);
+        const ac = Math.floor(a.x / this.cellSize);
+        const cell = this.grid[ar]?.[ac];
+        if (cell && !cell.carcass) {
+          const carcass = new Carcass(
+            'carcass_' + Math.random().toString(36).substr(2, 9),
+            a.speciesName || a.name,
+            a.x, a.y,
+            ar, ac,
+            20.0,
+            a.genes
+          );
+          cell.carcass = carcass;
+          this.carcasses.push(carcass);
         }
         this.animals.splice(i, 1);
         vaporizedAnimals++;
-      } else if (dist <= shockRadiusPx) {
-        const factor = 1.0 - (dist / shockRadiusPx);
-        const damage = factor * 70.0;
+      } else if (dist <= shockRadiusPx * 0.45) {
+        // Zona próxima: dano altíssimo, quase letal
+        const factor = 1.0 - (dist / (shockRadiusPx * 0.45));
+        const damage = 60.0 + factor * 110.0;
         a.energy -= damage;
-
         const angle = Math.atan2(a.y - targetY, a.x - targetX);
-        const impulse = factor * 9.0;
+        a.vx += Math.cos(angle) * (factor * 18.0);
+        a.vy += Math.sin(angle) * (factor * 18.0);
+        a.stateLabel = '🔥 Vaporizado pela Explosão!';
+        if (a.energy <= 0) {
+          this.animals.splice(i, 1);
+          vaporizedAnimals++;
+        } else {
+          a.isDiseased = true;
+          a.diseaseTimer = (a.diseaseTimer || 0) + 180;
+          damagedAnimals++;
+        }
+      } else if (dist <= shockRadiusPx) {
+        // Zona de onda de choque: dano moderado + arremesso
+        const factor = 1.0 - (dist / shockRadiusPx);
+        const damage = factor * 90.0;
+        a.energy -= damage;
+        const angle = Math.atan2(a.y - targetY, a.x - targetX);
+        const impulse = factor * 14.0;
         a.vx += Math.cos(angle) * impulse;
         a.vy += Math.sin(angle) * impulse;
-        a.stateLabel = 'Queimado por Onda de Choque!';
-
+        a.stateLabel = '💥 Queimado por Onda de Choque!';
         if (a.energy <= 0) {
           this.animals.splice(i, 1);
           vaporizedAnimals++;
@@ -2724,11 +2758,25 @@ class SimulationEngine {
     }
 
     this.createTerrainCache();
-    this.impactWinterTicks = 140;
+    this.impactWinterTicks = 280;
 
-    const msg = `💥 IMPACTO! ${vaporizedAnimals} animais e ${destroyedPlants} plantas eliminados! Inverno de Cinzas ativo por 140 ticks!`;
-    if (typeof toast === 'function') toast(msg, 4500);
+    const msg = `💥 CATÁSTROFE! ${vaporizedAnimals} animais e ${destroyedPlants} plantas eliminados! Inverno Nuclear ativo por 280 ticks!`;
+    if (typeof toast === 'function') toast(msg, 5500);
     console.log('[CATÁSTROFE]', msg);
+  }
+
+  /**
+   * Desloca o offset permanente de temperatura para simular mudanças climáticas.
+   * @param {number} delta — valor entre -0.5 e +0.5 (cada unidade ≈ 8°C)
+   */
+  shiftClimate(delta) {
+    this.climateOffset = Math.max(-1.5, Math.min(1.5, (this.climateOffset || 0) + delta));
+    const offsetC = Math.round(this.climateOffset * 16);
+    const sign = offsetC >= 0 ? '+' : '';
+    const icon = this.climateOffset > 0.3 ? '🔥' : (this.climateOffset < -0.3 ? '🧊' : '🌡️');
+    if (typeof toast === 'function') {
+      toast(`${icon} Mudança Climática: temperatura base ${sign}${offsetC}°C (offset acumulado)`);
+    }
   }
 
   updateStatsUI() {
@@ -2741,10 +2789,14 @@ class SimulationEngine {
     const curSeason = SEASONS[this.seasonIndex];
     const effTemp = curSeason.temp + (this.climateTrend || 0);
     const tempDeg = Math.round(18 + effTemp * 16);
+    const climOff = this.climateOffset || 0;
+    const climSuffix = Math.abs(climOff) > 0.05
+      ? ` <span style="color:${climOff > 0 ? '#f78166' : '#79c0ff'};font-size:10px;">${climOff > 0 ? '🔥' : '🧊'}${climOff > 0 ? '+' : ''}${Math.round(climOff * 16)}°</span>`
+      : '';
     if (this.impactWinterTicks > 0) {
-      if (elSeason) elSeason.innerHTML = `☄️ Inverno de Impacto (${tempDeg - 6}°C) [${this.impactWinterTicks}t]`;
+      if (elSeason) elSeason.innerHTML = `☄️ Inverno Nuclear (${tempDeg - 10}°C) [${this.impactWinterTicks}t]`;
     } else {
-      if (elSeason) elSeason.innerHTML = `${curSeason.icon} ${curSeason.name} (${tempDeg}°C)`;
+      if (elSeason) elSeason.innerHTML = `${curSeason.icon} ${curSeason.name} (${tempDeg}°C)${climSuffix}`;
     }
     if (elGen) elGen.textContent = `Geração ${this.generation}`;
     if (elAnimals) elAnimals.textContent = this.animals.length;

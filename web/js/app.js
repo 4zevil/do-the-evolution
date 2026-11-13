@@ -1290,6 +1290,56 @@ function saveAndStartWorld() {
       engine.equilibriumSettings.seedBankRate = seedBank;
       engine.equilibriumSettings.autoHomeostasis = homeostasis;
     }
+
+    // ── Ambiente Personalizado ──────────────────────────────
+    const initTempOffset = parseInt(document.getElementById('world-init-temp')?.value || 0);
+    const waterRatio = parseInt(document.getElementById('world-water-ratio')?.value || 8) / 100;
+    const rockyRatio = parseInt(document.getElementById('world-rocky-ratio')?.value || 6) / 100;
+    const soilFertility = parseInt(document.getElementById('world-soil-fertility')?.value || 60) / 100;
+    const sunlightMod = parseInt(document.getElementById('world-sunlight')?.value || 70) / 100;
+
+    // Temperatura base: 1°C de slider ≈ 0.0625 unidade interna
+    engine.climateOffset = initTempOffset / 16.0;
+
+    // Proporção de água / rocha personalizada
+    if (Math.abs(waterRatio - 0.08) > 0.01 || Math.abs(rockyRatio - 0.06) > 0.01) {
+      for (let r = 0; r < engine.gridRows; r++) {
+        for (let c = 0; c < engine.gridCols; c++) {
+          const cell = engine.grid[r][c];
+          const rnd = Math.random();
+          if (cell.biome === 'water' && rnd > waterRatio / 0.08) {
+            cell.biome = worldConfig.biome || 'fertile';
+            cell.moisture = 0.6;
+          } else if (cell.biome !== 'water' && rnd < Math.max(0, waterRatio - 0.08)) {
+            cell.biome = 'water';
+            cell.moisture = 1.0;
+          } else if (cell.biome === 'rocky' && rnd > rockyRatio / 0.06) {
+            cell.biome = worldConfig.biome || 'fertile';
+          } else if (cell.biome !== 'water' && cell.biome !== 'rocky' && rnd < Math.max(0, rockyRatio - 0.06)) {
+            cell.biome = 'rocky';
+          }
+        }
+      }
+      engine.createTerrainCache();
+    }
+
+    // Fertilidade do solo personalizada
+    const fertFactor = soilFertility / 0.60;
+    for (let r = 0; r < engine.gridRows; r++) {
+      for (let c = 0; c < engine.gridCols; c++) {
+        const cell = engine.grid[r][c];
+        if (cell.biome !== 'water') {
+          cell.soilNitrogen = Math.min(cell.maxSoilNitrogen, cell.soilNitrogen * fertFactor);
+          cell.moisture = Math.max(0.1, Math.min(1.0, cell.moisture * (0.5 + soilFertility * 0.8)));
+        }
+      }
+    }
+
+    // Intensidade solar como multiplicador de equilíbrio
+    engine.equilibriumSettings.sunlightMultiplier = sunlightMod / 0.70;
+
+    engine.render();
+    updateClimateButtonStates();
   }
   showPage('simulation');
 }
@@ -1691,4 +1741,41 @@ function triggerMeteorImpactAt(x, y) {
     engine.triggerMeteor(x, y);
     if (!engine.isRunning) engine.render();
   }
+}
+
+
+// ── CONTROLES DE MUDANÇA CLIMÁTICA ──────────────────────
+function shiftClimateGlobal(delta) {
+  if (typeof engine === 'undefined') return;
+  engine.shiftClimate(delta);
+  updateClimateButtonStates();
+  if (!engine.isRunning) engine.updateStatsUI();
+}
+
+function resetClimate() {
+  if (typeof engine === 'undefined') return;
+  engine.climateOffset = 0.0;
+  engine.shiftClimate(0);
+  if (typeof toast === 'function') toast('🌡️ Temperatura climática resetada para o padrão natural.');
+  updateClimateButtonStates();
+  if (!engine.isRunning) engine.updateStatsUI();
+}
+
+function updateClimateButtonStates() {
+  const resetBtn = document.getElementById('btn-reset-climate');
+  if (!resetBtn || typeof engine === 'undefined') return;
+  const off = engine.climateOffset || 0;
+  if (Math.abs(off) > 0.05) {
+    resetBtn.style.color = off > 0 ? 'var(--accent-hot)' : 'var(--accent-cold)';
+    resetBtn.style.borderColor = off > 0 ? 'var(--accent-hot)' : 'var(--accent-cold)';
+  } else {
+    resetBtn.style.color = '';
+    resetBtn.style.borderColor = '';
+  }
+}
+
+// ── AMBIENTE PERSONALIZADO: label de temperatura ─────────
+function updateInitTempLabel(val) {
+  const el = document.getElementById('world-init-temp-val');
+  if (el) el.textContent = (val >= 0 ? '+' : '') + val + '°C';
 }
