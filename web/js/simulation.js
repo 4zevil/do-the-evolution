@@ -530,6 +530,7 @@ class Animal extends Organism {
     this.state = 'wandering';
     this.stateLabel = 'Forrageando';
     this.mateCooldown = 30;
+    this.isSeekingMate = false;
     this.attackCooldown = 0;
     this.isDiseased = false;
     this.diseaseTimer = 0;
@@ -776,6 +777,7 @@ class Animal extends Organism {
       if (threat) {
         if (engine.aiMetrics) engine.aiMetrics.fleeEvents++;
         this.state = 'fleeing';
+        this.isSeekingMate = false;
         this.stateLabel = 'Fugindo de Predador!';
         this.fleeTicks = (this.fleeTicks || 0) + 1;
         const burst = this.fleeTicks < 25 ? 1.22 : 1.0;
@@ -1009,16 +1011,18 @@ class Animal extends Organism {
     const preyPerPredator = totalCarnivores > 0 ? (totalHerbivores / totalCarnivores) : 20.0;
     let reproductionFactor;
     if (isCarnivore) {
-      if (totalCarnivores < 3) {
-        reproductionFactor = totalHerbivores >= 10 ? 0.85 : 0.05;
-      } else if (preyPerPredator < 7.0 || totalCarnivores >= 12 || totalCarnivores > totalHerbivores * 0.16) {
-        reproductionFactor = 0.01;
-      } else if (preyPerPredator < 10.0) {
-        reproductionFactor = 0.10;
-      } else if (preyPerPredator >= 14.0 && totalCarnivores < 8) {
-        reproductionFactor = 0.65;
+      if (totalCarnivores <= 3) {
+        // Resgate reprodutivo para evitar extinção do topo da cadeia
+        reproductionFactor = totalHerbivores >= 5 ? 0.85 : 0.25;
+      } else if (totalCarnivores >= 15 || totalCarnivores > totalHerbivores * 0.18 || preyPerPredator < 3.0) {
+        // Teto de capacidade de suporte de predadores (evita superpopulação)
+        reproductionFactor = 0.0;
+      } else if (preyPerPredator < 5.0 || totalCarnivores >= 10) {
+        reproductionFactor = 0.18;
+      } else if (preyPerPredator >= 8.0) {
+        reproductionFactor = 0.60;
       } else {
-        reproductionFactor = 0.25;
+        reproductionFactor = 0.35;
       }
     } else {
       reproductionFactor = totalHerbivores < 35
@@ -1032,13 +1036,19 @@ class Animal extends Organism {
               : 0.01;
     }
 
-    const canStartReproduction = Math.random() < reproductionFactor;
-    const reproEnergyThreshold = isCarnivore ? 90.0 : 65.0;
+    if (reproductionFactor === 0.0) {
+      this.isSeekingMate = false;
+    } else if (this.isSeekingMate && (this.energy < 55.0 || this.mateCooldown > 0)) {
+      this.isSeekingMate = false;
+    }
+
+    const canStartReproduction = reproductionFactor > 0 && (this.isSeekingMate || Math.random() < reproductionFactor);
+    const reproEnergyThreshold = isCarnivore ? 78.0 : 62.0;
 
     if (
       canStartReproduction &&
       this.energy > reproEnergyThreshold &&
-      this.age > 45 &&
+      this.age > 40 &&
       this.mateCooldown === 0 &&
       !this.isDiseased &&
       !this.isPregnant
@@ -1074,6 +1084,7 @@ class Animal extends Organism {
         targetX = bestMate.x;
         targetY = bestMate.y;
         desiredSpeed = maxSpeed * 0.85;
+        this.isSeekingMate = true;
         this.stateLabel = 'Buscando Parceiro';
 
         if (minMDist < 16) {
@@ -1082,6 +1093,8 @@ class Animal extends Organism {
           this.energy -= mateCost;
           bestMate.energy -= mateCost;
 
+          this.isSeekingMate = false;
+          bestMate.isSeekingMate = false;
           this.mateCooldown = 110;
           bestMate.mateCooldown = 110;
 
@@ -1152,7 +1165,7 @@ class Animal extends Organism {
 
           let clutchSize;
           if (isCarnivore) {
-            clutchSize = (preyPerPredator >= 12 && totalCarnivores < 8) ? 2 : 1;
+            clutchSize = (preyPerPredator >= 12 && totalCarnivores < 6) ? 2 : 1;
           } else {
             clutchSize = (totalHerbivores < 60 && Math.random() < 0.6) ? 2 : 1;
           }
@@ -1166,7 +1179,7 @@ class Animal extends Organism {
           this.pregnantClutchSize = clutchSize;
           this.stateLabel = 'Iniciou Gestação';
 
-          const mateCooldownVal = isCarnivore ? 140 : (totalHerbivores < 60 ? 60 : 85);
+          const mateCooldownVal = isCarnivore ? 160 : (totalHerbivores < 60 ? 60 : 85);
           this.mateCooldown = mateCooldownVal;
           bestMate.mateCooldown = mateCooldownVal;
           return;
