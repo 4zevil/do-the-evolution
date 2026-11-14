@@ -67,6 +67,7 @@ window.showPage = UIController.showPage.bind(UIController);
 window.toast = UIController.toast.bind(UIController);
 window.switchSidePanel = UIController.switchSidePanel.bind(UIController);
 window.updateSideConsole = UIController.updateSideConsole.bind(UIController);
+window.setMapViewMode = UIController.setMapViewMode.bind(UIController);
 
 // Criador de Animais
 window.initAnimalCreator = AnimalCreatorController.init.bind(AnimalCreatorController);

@@ -4,6 +4,7 @@
 // ====================================================
 
 import { SEASONS, HARD_CRASH_FAILSAFE, SPECIES_PALETTE } from './core/constants.js';
+import { Genome } from './core/Genome.js';
 import { WorldGenerator } from './world/WorldGenerator.js';
 import { Renderer } from './systems/Renderer.js';
 import { MeteorSystem } from './systems/MeteorSystem.js';
@@ -192,18 +193,34 @@ export class SimulationEngine {
     this.render();
   }
 
-  registerSpecies(name, type, genes, ancestor = null, rootName = null, divergentTrait = null) {
+  registerSpecies(name, type, genes, ancestor = null, rootName = null, divergentTrait = null, metadata = {}) {
     if (!this.speciesRegistry[name]) {
       const color = SPECIES_PALETTE[this.speciesCatalog.length % SPECIES_PALETTE.length];
+      const slug = String(name || 'species').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'sp';
+      const speciesId = metadata.id || `sp_${this.speciesCatalog.length + 1}_${slug}`;
+      const parentEntry = ancestor ? this.speciesRegistry[ancestor] : null;
+      const parentSpeciesId = metadata.parentSpeciesId !== undefined
+        ? metadata.parentSpeciesId
+        : (parentEntry ? parentEntry.id : (ancestor || null));
+      const originTick = metadata.originTick !== undefined ? metadata.originTick : this.tickCount;
+      const originBiome = metadata.originBiome !== undefined
+        ? metadata.originBiome
+        : (this.worldConfig?.biome || null);
+
       const entry = {
+        id: speciesId,
         name: name,
         type: type,
         color: color,
         originGeneration: this.generation,
-        originTick: this.tickCount,
+        originTick: originTick,
+        originBiome: originBiome,
         ancestor: ancestor,
+        parentSpeciesId: parentSpeciesId,
         rootName: rootName || name,
         divergentTrait: divergentTrait,
+        geneticDistance: metadata.geneticDistance ?? 0,
+        speciationThreshold: metadata.speciationThreshold ?? Genome.SPECIATION_DISTANCE_THRESHOLD,
         founderGenes: JSON.parse(JSON.stringify(genes || {}))
       };
       this.speciesRegistry[name] = entry;
@@ -606,7 +623,7 @@ export class SimulationEngine {
       }
     }
 
-    // 3. VEGETAIS (POO)
+    // 3. VEGETAIS (POO) — já envia a GridCell atual para cálculo de Liebig
     for (let idx = this.plants.length - 1; idx >= 0; idx--) {
       const plant = this.plants[idx];
       if (!plant) { this.plants.splice(idx, 1); continue; }
@@ -672,12 +689,15 @@ export class SimulationEngine {
       }
     }
 
-    // 4. FISIOLOGIA ANIMAL (POO)
+    // 4. FISIOLOGIA ANIMAL (POO) — passa a GridCell atual para camuflagem e bioma de origem
     const deadAnimals = [];
     const newOffspring = [];
 
     this.animals.forEach(anim => {
-      anim.tick(curSeason, this, newOffspring, deadAnimals);
+      const cr = Math.max(0, Math.min(this.gridRows - 1, Math.floor(anim.y / this.cellSize)));
+      const cc = Math.max(0, Math.min(this.gridCols - 1, Math.floor(anim.x / this.cellSize)));
+      const currentCell = this.grid[cr]?.[cc] || null;
+      anim.tick(curSeason, this, newOffspring, deadAnimals, currentCell);
     });
 
     deadAnimals.forEach(dead => {

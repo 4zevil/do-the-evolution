@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -836,6 +836,16 @@
           <button class="btn btn-secondary btn-sm climate-btn" onclick="resetClimate()" id="btn-reset-climate" title="Resetar Clima">↺</button>
           <button class="btn btn-secondary btn-sm climate-btn" onclick="shiftClimateGlobal(+0.25)" title="Aquecimento Global +4°C">🔥 +</button>
         </div>
+
+        <!-- LENTE DIDÁTICA DO MAPA -->
+        <div class="climate-group" title="Modo de visualização didática do mapa">
+          <span class="climate-label">🗺️ Lente</span>
+          <select id="map-lens-select" class="analytics-select" onchange="setMapViewMode(this.value)" aria-label="Modo de visualização do mapa">
+            <option value="biomes">Normal (Biomas)</option>
+            <option value="temperature">Mapa de Temperatura</option>
+            <option value="nutrients">Mapa de Nutrientes</option>
+          </select>
+        </div>
       </div>
 
       <div class="sim-badges">
@@ -857,6 +867,7 @@
       <!-- ÁREA DE CANVAS 2D -->
       <div class="sim-canvas-area">
         <canvas id="sim-canvas"></canvas>
+        <div id="map-lens-legend" style="display:none;position:absolute;bottom:12px;left:12px;background:rgba(13,17,23,0.86);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;color:var(--text-main);pointer-events:none;z-index:10;backdrop-filter:blur(4px);"></div>
       </div>
 
       <!-- PAINEL LATERAL COM ABAS: INSPETOR | CENSO | CONSOLE -->
@@ -871,7 +882,7 @@
         <!-- PAINEL 1: INSPETOR -->
         <div id="sidepanel-inspector" class="sidepanel active">
           <div class="inspector-card" id="sim-inspector">
-            <span style="color:var(--text-dim);font-size:12px;">Clique em um animal ou planta na tela para inspecionar seus genes, energia e comportamento em tempo real.</span>
+            <span style="color:var(--text-dim);font-size:12px;">Clique em um animal ou planta na tela para inspecionar seu estágio de vida, compatibilidade térmica, fator limitante e genótipo.</span>
           </div>
           <h3 style="margin-top:16px;font-size:12px;color:var(--text-dim);">📖 Guia Ecológico</h3>
           <div style="font-size:11px;color:var(--text-muted);display:flex;flex-direction:column;gap:6px;line-height:1.4;">
@@ -1255,7 +1266,6 @@
           <div id="console-terminal-lines"></div>
         </div>
       </div>
-
       <!-- SUB-ABA 3: OPÇÕES DE EQUILÍBRIO & EVOLUÇÃO -->
       <div id="console-subview-balance" class="console-subview" style="display:none;">
         <div class="balance-settings-layout">
@@ -1515,6 +1525,6 @@
   <script src="js/paint.js"></script>
   <script src="js/console.js"></script>
   <script src="js/analytics.js"></script>
-  <script src="js/bundle.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

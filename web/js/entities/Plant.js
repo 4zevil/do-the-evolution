@@ -18,11 +18,51 @@ export class Plant extends Organism {
     this.growth = 0.35;
     this.hasFruit = false;
     this.fruitCount = 0;
+    this.limitingFactor = 'Luz Solar';
+    this.liebigBreakdown = {
+      lightFactor: 1.0,
+      nitrogenFactor: 1.0,
+      waterFactor: 1.0,
+      thermalPlantFactor: 1.0,
+      liebig: 1.0
+    };
   }
 
   getMaintenanceCost() {
     const g = this.genes;
     return 0.02 + ((g.height || 0.5) * 0.02) + ((g.defense || 0.3) * 0.015);
+  }
+
+  /**
+   * Identifica e expõe qual recurso da Lei de Liebig limita o crescimento no tick atual.
+   */
+  evaluateLimitingFactor(lightFactor, nitrogenFactor, waterFactor, thermalPlantFactor, liebig, cell, maintenanceCost) {
+    this.liebigBreakdown = {
+      lightFactor,
+      nitrogenFactor,
+      waterFactor,
+      thermalPlantFactor,
+      liebig
+    };
+
+    if (cell && cell.soilNitrogen < maintenanceCost) {
+      this.limitingFactor = 'Nitrogênio';
+      return this.limitingFactor;
+    }
+
+    if (nitrogenFactor <= lightFactor && nitrogenFactor <= waterFactor) {
+      this.limitingFactor = 'Nitrogênio';
+    } else if (waterFactor <= lightFactor && waterFactor <= nitrogenFactor) {
+      this.limitingFactor = 'Água';
+    } else {
+      this.limitingFactor = 'Luz Solar';
+    }
+
+    return this.limitingFactor;
+  }
+
+  getLimitingFactor() {
+    return this.limitingFactor;
   }
 
   tick(curSeason, cell, plantMetrics, engine) {
@@ -35,7 +75,10 @@ export class Plant extends Organism {
     const g = this.genes;
     const maintenanceCost = this.getMaintenanceCost();
 
-    const tempDiff = Math.abs((g.thermal || 0.0) - curSeason.temp);
+    const localTemp = engine?.climate?.getCellTemperature
+      ? engine.climate.getCellTemperature(cell, curSeason)
+      : (curSeason.temp + (cell?.localTempOffset ?? 0.0));
+    const tempDiff = Math.abs((g.thermal || 0.0) - localTemp);
     const thermalPlantFactor = tempDiff > 0.4 ? 1.0 + (tempDiff - 0.4) * 0.6 : 1.0;
 
     const sunlightMod = engine?.equilibriumSettings?.sunlightMultiplier ?? 1.0;
@@ -44,6 +87,8 @@ export class Plant extends Organism {
     const nitrogenFactor = cell.soilNitrogen / (10.0 + cell.soilNitrogen);
     const waterFactor = Math.min(1.0, cell.moisture * (0.7 + (g.rootEfficiency || 0.5) * 0.6));
     const liebig = Math.min(lightFactor, nitrogenFactor, waterFactor) / thermalPlantFactor;
+
+    this.evaluateLimitingFactor(lightFactor, nitrogenFactor, waterFactor, thermalPlantFactor, liebig, cell, maintenanceCost);
 
     // Longevidade genética
     const baseLifespan = 320 + ((g.height || 0.5) * 320) + ((g.defense || 0.3) * 180) - ((g.growthSpeed || 0.5) * 140);
@@ -103,8 +148,9 @@ export class Plant extends Organism {
     const dr = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
     const dc = Math.floor(Math.random() * (windReach * 2 + 1)) - windReach;
     const nr = this.r + dr, nc = this.c + dc;
+    const targetCell = engine.grid[nr]?.[nc];
 
-    if (engine.grid[nr]?.[nc] && engine.grid[nr][nc].biome !== 'water' && !engine.grid[nr][nc].plant) {
+    if (targetCell && targetCell.biome !== 'water' && !targetCell.plant) {
       let partnerGenes = g;
       const searchRadius = 3;
       for (let pr = Math.max(0, this.r - searchRadius); pr <= Math.min(engine.gridRows - 1, this.r + searchRadius); pr++) {
@@ -144,18 +190,32 @@ export class Plant extends Organism {
       const founderGenes = speciesData.founderGenes || g;
       const rootName = speciesData.rootName || baseName.replace(/\s*(Espinhosa|Indefesa|Gigante|Rasteira|Árida|Aquática|Pioneira|Tardia|Tropical|Boreal)/g, '').trim();
 
-      const speciation = Genome.evaluatePlantSpeciation(childGenes, founderGenes);
+      const speciation = Genome.evaluatePlantSpeciation(childGenes, founderGenes, {
+        parentSpeciesId: speciesData.id || baseName,
+        originTick: engine.tickCount,
+        originBiome: targetCell.biome || engine.worldConfig?.biome || null
+      });
       let childSpeciesName = baseName;
 
       if (speciation.diverged) {
-        childSpeciesName = rootName + ' ' + speciation.desc;
+        childSpeciesName = `${rootName} ${speciation.desc}`;
+        if (childSpeciesName === baseName) {
+          childSpeciesName = `${rootName} ${speciation.desc} II`;
+        }
         const isNew = engine.registerSpecies(
           childSpeciesName,
           'plant',
           childGenes,
           baseName,
           rootName,
-          speciation.traitName + ' ' + speciation.desc
+          speciation.traitName + ' ' + speciation.desc,
+          {
+            parentSpeciesId: speciation.parentSpeciesId,
+            originTick: speciation.originTick,
+            originBiome: speciation.originBiome,
+            geneticDistance: speciation.distance,
+            speciationThreshold: speciation.threshold
+          }
         );
         if (isNew && typeof toast === 'function') {
           toast('🌿 Nova Linhagem Vegetal: "' + childSpeciesName + '" emergiu por seleção de ' + speciation.traitName + '!');
@@ -173,7 +233,7 @@ export class Plant extends Organism {
       clonePlant.growth = 0.14;
       clonePlant.energy = 28.0;
 
-      engine.grid[nr][nc].plant = clonePlant;
+      targetCell.plant = clonePlant;
       engine.plants.push(clonePlant);
       if (engine.plantMetrics) engine.plantMetrics.reproduced++;
     }

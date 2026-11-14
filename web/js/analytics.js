@@ -392,3 +392,7 @@ populateGeneSpeciesSelect() {
 }
 
 const analyticsModal = new AnalyticsModal();
+
+if (typeof window !== 'undefined') {
+  window.analyticsModal = analyticsModal;
+}

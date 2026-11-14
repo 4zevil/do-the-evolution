@@ -301,3 +301,7 @@ class MiniPaint {
 
 // Instância global do Mini Paint
 const miniPaint = new MiniPaint();
+
+if (typeof window !== 'undefined') {
+  window.miniPaint = miniPaint;
+}
